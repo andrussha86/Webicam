@@ -46,7 +46,8 @@ constexpr int64_t kPeriod30 = 10'000'000 / 30;
 
 TEST(H264Decoder, DecodesTestPattern) {
   Fixture f(1280, 720, 30);
-  ASSERT_TRUE(f.encoder && f.decoder);
+  ASSERT_TRUE(f.encoder);
+  if (!f.decoder) GTEST_SKIP() << "no D3D11 H.264 decoder on this machine";
   int frames = 0;
   for (int n = 0; n < 60; ++n) {
     uint64_t index = 0;
@@ -66,7 +67,8 @@ TEST(H264Decoder, DecodesTestPattern) {
 
 TEST(H264Decoder, ReportsDisplaySizeFor1080p) {
   Fixture f(1920, 1080, 30);
-  ASSERT_TRUE(f.encoder && f.decoder);
+  ASSERT_TRUE(f.encoder);
+  if (!f.decoder) GTEST_SKIP() << "no D3D11 H.264 decoder on this machine";
   for (int n = 0; n < 10; ++n) {
     uint64_t index = 0;
     bool key = false;
@@ -82,7 +84,8 @@ TEST(H264Decoder, ReportsDisplaySizeFor1080p) {
 
 TEST(H264Decoder, GarbageReturnsErrorThenRecoversOnKeyframe) {
   Fixture f(1280, 720, 30);
-  ASSERT_TRUE(f.encoder && f.decoder);
+  ASSERT_TRUE(f.encoder);
+  if (!f.decoder) GTEST_SKIP() << "no D3D11 H.264 decoder on this machine";
   std::vector<uint8_t> garbage(64, 0xAB);
   DecodedFrame frame;
   EXPECT_EQ(f.decoder->Decode(garbage, 0, frame), H264Decoder::Result::Error);
@@ -98,7 +101,8 @@ TEST(H264Decoder, GarbageReturnsErrorThenRecoversOnKeyframe) {
 
 TEST(H264Decoder, LowLatencyNoFrameDelay) {
   Fixture f(1280, 720, 30);
-  ASSERT_TRUE(f.encoder && f.decoder);
+  ASSERT_TRUE(f.encoder);
+  if (!f.decoder) GTEST_SKIP() << "no D3D11 H.264 decoder on this machine";
   uint64_t index = 0;
   bool key = false;
   std::vector<uint8_t> bytes;
