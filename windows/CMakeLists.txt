@@ -1,0 +1,13 @@
+cmake_minimum_required(VERSION 3.25)
+project(webicam LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+add_compile_definitions(UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0A00)
+add_compile_options(/W4 /permissive- /utf-8 /EHsc)
+
+enable_testing()
+add_subdirectory(core)
+add_subdirectory(tests)
+add_subdirectory(tools/gen-testvectors)
+add_subdirectory(vcam)

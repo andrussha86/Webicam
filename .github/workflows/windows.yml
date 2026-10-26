@@ -1,0 +1,29 @@
+name: windows
+on:
+  push:
+  pull_request:
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+      - uses: lukka/get-cmake@latest
+      - uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgJsonGlob: windows/vcpkg.json
+      - name: Configure
+        run: cmake --preset release -S windows
+      - name: Build
+        run: cmake --build windows/build/release
+      - name: Test
+        run: ctest --test-dir windows/build/release --output-on-failure
+      - uses: actions/upload-artifact@v4
+        with:
+          name: webicam-windows
+          path: |
+            windows/build/release/app/webicam.exe
+            windows/build/release/vcam/webicam_vcam.dll
+            windows/install.ps1
+            windows/uninstall.ps1
+          if-no-files-found: ignore

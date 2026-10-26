@@ -1,0 +1,7 @@
+find_package(GTest CONFIG REQUIRED)
+file(GLOB WEBICAM_TEST_SOURCES CONFIGURE_DEPENDS *.cpp)
+add_executable(webicam_tests ${WEBICAM_TEST_SOURCES})
+target_link_libraries(webicam_tests PRIVATE webicam_core GTest::gtest GTest::gtest_main)
+target_compile_definitions(webicam_tests PRIVATE WEBICAM_TESTVECTORS_DIR="${CMAKE_SOURCE_DIR}/../shared/testvectors")
+include(GoogleTest)
+gtest_discover_tests(webicam_tests DISCOVERY_MODE PRE_TEST)
