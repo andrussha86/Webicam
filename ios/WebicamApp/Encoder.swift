@@ -54,10 +54,10 @@ final class Encoder {
 
     func encode(_ pixelBuffer: CVPixelBuffer, time: CMTime) {
         let state: (VTCompressionSession, Bool)? = lock.withLock {
-            guard let session, !busy else { return nil }
-            busy = true
-            defer { forceKey = false }
-            return (session, forceKey)
+            guard let current = self.session, !self.busy else { return nil }
+            self.busy = true
+            defer { self.forceKey = false }
+            return (current, self.forceKey)
         }
         guard let state else { return }
         let (session, key) = state
