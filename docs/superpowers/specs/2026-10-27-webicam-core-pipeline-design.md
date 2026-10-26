@@ -88,11 +88,11 @@ iPhone                                Windows 11
 | `StatusView` | «Ожидание ПК» / «Подключено», текущие разрешение, FPS и битрейт, кнопка «Стоп», затемнение экрана, `isIdleTimerDisabled = true`. |
 | `WebicamCore` (Swift Package) | Кодирование и разбор протокола, таблица битрейтов по умолчанию. Без зависимостей от камеры; тестируется `swift test`. |
 
-### 4.2 `webicam.exe` (C++20, CMake, Dear ImGui на D3D11)
+### 4.2 `webicam.exe` (C++23, CMake, Dear ImGui на D3D11)
 
 | Компонент | Ответственность |
 |---|---|
-| `UsbmuxClient` | Соединение с `127.0.0.1:27015`, протокол usbmux (plist-сообщения `Listen`, `ListDevices`, `Connect`), события подключения и отключения, открытие туннеля к порту 47800 устройства. |
+| `UsbmuxClient` | Соединение с `127.0.0.1:27015`, протокол usbmux (plist-сообщения `Listen`, `ListDevices`, `Connect`), отслеживание подключения и отключения опросом `ListDevices` раз в секунду, открытие туннеля к порту 47800 устройства. |
 | `DeviceSession` | Протокол Webicam поверх сокета (§5): рукопожатие, приём кадров, отправка команд, синхронизация часов, переподключение. |
 | `Decoder` | Media Foundation H.264 decoder MFT с D3D11 (DXVA) и `CODECAPI_AVLowLatencyMode = TRUE`; выход — NV12-текстура. При ошибке ждёт ключевого кадра. |
 | `Scaler` | D3D11 Video Processor: масштабирование в формат, выбранный потребителем, с сохранением пропорций (letterbox/crop по центру). |
@@ -101,7 +101,7 @@ iPhone                                Windows 11
 | `UI` | Список устройств, превью, выбор разрешения и FPS захвата, битрейт, статистика: FPS, задержка до общей памяти, потерянные кадры, состояние соединения. Сворачивание в трей. |
 | `--direct host:port` | Отладочный режим: подключение напрямую по TCP, минуя usbmux (для `fake-phone`). |
 
-### 4.3 `webicam_vcam.dll` (C++20, COM, Media Foundation)
+### 4.3 `webicam_vcam.dll` (C++23, COM, Media Foundation)
 
 - Реализует `IMFMediaSource` / `IMFMediaStream` с одним видеопотоком NV12. Регистрируется
   как COM in-proc server с фиксированным CLSID.
