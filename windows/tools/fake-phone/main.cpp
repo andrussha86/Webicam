@@ -1,4 +1,4 @@
-// Stands in for the iPhone app: speaks the Webicam protocol over TCP and
+﻿// Stands in for the iPhone app: speaks the Webicam protocol over TCP and
 // streams the synthetic H.264 test pattern.
 //   fake-phone [--port 47800] [--width 1920 --height 1080 --fps 60]
 #include <array>
@@ -94,6 +94,7 @@ void Serve(Socket client, const Options& options) {
 }  // namespace
 
 int main(int argc, char** argv) {
+  std::setvbuf(stdout, nullptr, _IONBF, 0);
   Options options;
   for (int i = 1; i + 1 < argc; i += 2) {
     const std::string arg = argv[i];
