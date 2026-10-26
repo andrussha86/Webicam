@@ -18,7 +18,8 @@ uint64_t NowUs() {
   return uint64_t(now.QuadPart / frequency * 1'000'000 + now.QuadPart % frequency * 1'000'000 / frequency);
 }
 
-DeviceSession::DeviceSession(Socket socket, Events events) : socket_(std::move(socket)), events_(std::move(events)) {}
+DeviceSession::DeviceSession(Socket socket, Events events, int idleTimeoutMs)
+    : socket_(std::move(socket)), events_(std::move(events)), idleTimeoutMs_(idleTimeoutMs) {}
 
 DeviceSession::~DeviceSession() {
   stopping_ = true;
@@ -59,6 +60,7 @@ void DeviceSession::Run() {
   std::vector<uint8_t> buffer(256 * 1024);
   bool handshaken = false;
   uint64_t lastPingUs = 0;
+  uint64_t lastReceiveUs = NowUs();
 
   while (!stopping_ && !closed_) {
     const uint64_t now = NowUs();
@@ -67,12 +69,17 @@ void DeviceSession::Run() {
       Send(proto::Ping{now});
     }
 
+    if (now - lastReceiveUs > uint64_t(idleTimeoutMs_) * 1000) {
+      Close("нет данных от телефона");
+      return;
+    }
     const int received = socket_.Recv(buffer, 100);
     if (received == -2) continue;
     if (received <= 0) {
       Close(received == 0 ? "соединение закрыто телефоном" : "ошибка соединения");
       return;
     }
+    lastReceiveUs = NowUs();
     parser.Feed(std::span(buffer.data(), size_t(received)));
 
     proto::Message message;

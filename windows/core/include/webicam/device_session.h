@@ -29,7 +29,11 @@ class DeviceSession {
     std::function<void(std::string reason)> onClosed;
   };
 
-  DeviceSession(Socket socket, Events events);
+  // Closes the session when nothing (frames, pongs) arrives for idleTimeoutMs —
+  // a suspended iPhone app can leave the USB tunnel open but silent.
+  static constexpr int kDefaultIdleTimeoutMs = 3000;
+
+  DeviceSession(Socket socket, Events events, int idleTimeoutMs = kDefaultIdleTimeoutMs);
   DeviceSession(const DeviceSession&) = delete;
   DeviceSession& operator=(const DeviceSession&) = delete;
   ~DeviceSession();
@@ -47,6 +51,7 @@ class DeviceSession {
 
   Socket socket_;
   Events events_;
+  int idleTimeoutMs_;
   std::thread thread_;
   std::atomic<bool> stopping_{false};
   std::atomic<bool> closed_{false};

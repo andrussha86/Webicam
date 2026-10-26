@@ -10,7 +10,8 @@ Pipeline::Pipeline(D3DContext d3d, std::function<void()> requestKeyframe,
       requestKeyframe_(std::move(requestKeyframe)),
       phoneToPcUs_(std::move(phoneToPcUs)),
       decoder_(H264Decoder::Create(d3d_)),
-      scaler_(FrameScaler::Create(d3d_)) {}
+      scaler_(FrameScaler::Create(d3d_)),
+      previewScaler_(FrameScaler::Create(d3d_)) {}
 
 void Pipeline::OnFrame(proto::VideoFrame&& frame) {
   std::lock_guard lock(mutex_);
@@ -61,6 +62,7 @@ void Pipeline::OnFrame(proto::VideoFrame&& frame) {
 void Pipeline::OnConnectionChanged(bool connected) {
   std::lock_guard lock(mutex_);
   connected_ = connected;
+  phoneStreaming_ = true;
   if (connected) {
     waitingForKeyframe_ = true;
     if (decoder_) decoder_->Reset();
@@ -71,6 +73,12 @@ void Pipeline::OnConnectionChanged(bool connected) {
   publisher_.Heartbeat(connected_);
 }
 
+void Pipeline::SetPhoneStreaming(bool streaming) {
+  std::lock_guard lock(mutex_);
+  phoneStreaming_ = streaming;
+  publisher_.Heartbeat(connected_ && phoneStreaming_);
+}
+
 void Pipeline::Tick() {
   std::lock_guard lock(mutex_);
   const uint64_t now = SteadyNowMs();
@@ -78,14 +86,14 @@ void Pipeline::Tick() {
     lastAttachTryMs_ = now;
     publisher_.TryAttach();
   }
-  publisher_.Heartbeat(connected_);
+  publisher_.Heartbeat(connected_ && phoneStreaming_);
   if (!publisher_.Requested()) stats_.output.reset();
 }
 
 ID3D11ShaderResourceView* Pipeline::Preview(uint32_t maxW, uint32_t maxH) {
   std::lock_guard lock(mutex_);
-  if (!last_ || !scaler_) return nullptr;
-  return scaler_->ToPreview(*last_, maxW, maxH);
+  if (!last_ || !previewScaler_) return nullptr;
+  return previewScaler_->ToPreview(*last_, maxW, maxH);
 }
 
 PipelineStats Pipeline::Stats() const {

@@ -189,12 +189,25 @@ STDMETHODIMP MediaStream::RequestSample(IUnknown* token) {
   // Wait (outside the lock) for the next published frame, at most one frame period.
   HANDLE event = nullptr;
   uint32_t fps = 30;
+  LONGLONG earliest = 0;
   {
     std::lock_guard lock(mutex_);
     if (!queue_) return MF_E_SHUTDOWN;
     if (state_ != MF_STREAM_STATE_RUNNING) return MF_E_INVALIDREQUEST;
     event = frameEvent_;
     fps = format_.fps ? format_.fps : 30;
+    if (lastDeliveryTime_) earliest = lastDeliveryTime_ + 10'000'000 / fps;
+  }
+  // Never deliver faster than the negotiated frame rate.
+  if (const LONGLONG wait = earliest - MFGetSystemTime(); earliest && wait > 0) {
+    if (HANDLE timer = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
+                                              TIMER_ALL_ACCESS)) {
+      LARGE_INTEGER due;
+      due.QuadPart = -wait;
+      SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE);
+      WaitForSingleObject(timer, INFINITE);
+      CloseHandle(timer);
+    }
   }
   const DWORD periodMs = DWORD(1000 / fps);
   if (event) {

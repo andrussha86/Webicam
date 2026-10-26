@@ -28,7 +28,9 @@ std::optional<proto::Configure> DefaultConfigure(const std::vector<proto::Captur
 ConnectionManager::ConnectionManager(Callbacks callbacks, uint16_t usbmuxPort)
     : callbacks_(std::move(callbacks)), usbmux_(usbmuxPort) {}
 
-ConnectionManager::~ConnectionManager() {
+ConnectionManager::~ConnectionManager() { Stop(); }
+
+void ConnectionManager::Stop() {
   stop_ = true;
   if (thread_.joinable()) thread_.join();
   std::unique_ptr<DeviceSession> session;

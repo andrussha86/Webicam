@@ -12,6 +12,10 @@ class MediaSource
           IKsControl> {
  public:
   HRESULT RuntimeClassInitialize();
+  bool IsShutdown() {
+    std::lock_guard lock(mutex_);
+    return !queue_;
+  }
 
   // IMFMediaEventGenerator
   STDMETHODIMP BeginGetEvent(IMFAsyncCallback* callback, IUnknown* state) override;

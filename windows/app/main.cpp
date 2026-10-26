@@ -192,10 +192,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
                      "). Запустите install.ps1 от имени администратора.";
   }
 
+  // The pipeline's callbacks reach the connection through a raw pointer that
+  // stays valid until after connection->Stop() has joined every thread.
   std::unique_ptr<ConnectionManager> connection;
+  ConnectionManager* connectionPtr = nullptr;
   Pipeline pipeline(
-      g_app.d3d, [&] { connection->RequestKeyframe(); },
-      [&](uint64_t phoneUs) { return connection->PhoneToPcUs(phoneUs); });
+      g_app.d3d, [&] { connectionPtr->RequestKeyframe(); },
+      [&](uint64_t phoneUs) { return connectionPtr->PhoneToPcUs(phoneUs); });
   if (!pipeline.Ready()) ui.cameraError = "Нет аппаратного декодера H.264 (D3D11).";
 
   std::mutex statusMutex;
@@ -212,6 +215,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
           },
       .onStatus =
           [&](const proto::Status& status) {
+            pipeline.SetPhoneStreaming(status.state == proto::StreamState::Streaming ||
+                                       status.state == proto::StreamState::ThermalThrottled);
             std::lock_guard lock(statusMutex);
             switch (status.state) {
               case proto::StreamState::Streaming: phoneStatus.clear(); break;
@@ -223,6 +228,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
             }
           },
   });
+  connectionPtr = connection.get();
   if (direct) connection->SetDirect(direct->first, direct->second);
   connection->Start();
 
@@ -254,6 +260,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     g_app.swapChain->Present(1, 0);
   }
 
+  connection->Stop();
   connection.reset();
   camera.Stop();
   Shell_NotifyIconW(NIM_DELETE, &g_app.tray);

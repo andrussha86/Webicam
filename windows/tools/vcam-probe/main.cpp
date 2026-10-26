@@ -43,6 +43,7 @@ void DrawBars(std::vector<uint8_t>& nv12, uint32_t width, uint32_t height, uint3
 }  // namespace
 
 int wmain(int argc, wchar_t** argv) {
+  std::setvbuf(stdout, nullptr, _IONBF, 0);
   int stopHeartbeatAfter = -1;
   for (int i = 1; i + 1 < argc; ++i) {
     if (std::wstring(argv[i]) == L"--stop-heartbeat-after") stopHeartbeatAfter = _wtoi(argv[i + 1]);

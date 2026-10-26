@@ -14,8 +14,9 @@ if (-not (Test-Path $dll)) { Write-Error "Не найден $dll"; exit 1 }
 $target = Join-Path $env:ProgramFiles "Webicam"
 New-Item -ItemType Directory -Force $target | Out-Null
 $installed = Join-Path $target "webicam_vcam.dll"
-if (Test-Path $installed) { & regsvr32.exe /u /s $installed }
+if (Test-Path $installed) { Start-Process regsvr32.exe -ArgumentList "/u /s `"$installed`"" -Wait }
 Copy-Item $dll $installed -Force
-& regsvr32.exe /s $installed
-if ($LASTEXITCODE -ne 0) { Write-Error "regsvr32 завершился с кодом $LASTEXITCODE"; exit $LASTEXITCODE }
+# regsvr32 is a GUI program: wait for it explicitly to get its exit code.
+$reg = Start-Process regsvr32.exe -ArgumentList "/s `"$installed`"" -Wait -PassThru
+if ($reg.ExitCode -ne 0) { Write-Error "regsvr32 завершился с кодом $($reg.ExitCode)"; exit $reg.ExitCode }
 Write-Host "Webicam: виртуальная камера зарегистрирована ($installed)."

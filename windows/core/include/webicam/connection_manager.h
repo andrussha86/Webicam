@@ -34,6 +34,8 @@ class ConnectionManager {
   // Must be called before Start(): bypass usbmux and connect to host:port.
   void SetDirect(std::string host, uint16_t port);
   void Start();
+  // Joins the worker thread and drops the session; no callbacks fire afterwards.
+  void Stop();
 
   ConnState State() const;
   std::string Detail() const;  // Russian status line for the UI

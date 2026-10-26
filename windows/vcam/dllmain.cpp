@@ -25,13 +25,20 @@ class __declspec(uuid("7C1D4E2A-5B3F-4E8A-9C21-6D0B8F3A1E57")) Activator
   STDMETHODIMP ActivateObject(REFIID riid, void** object) override {
     if (!object) return E_POINTER;
     *object = nullptr;
-    if (!source_) {
+    // A source that was shut down cannot be restarted; Frame Server may reuse
+    // this activator when the camera is opened again.
+    if (!source_ || source_->IsShutdown()) {
+      source_.Reset();
       HRESULT hr = Microsoft::WRL::MakeAndInitialize<MediaSource>(&source_);
       if (FAILED(hr)) return hr;
     }
     return source_->QueryInterface(riid, object);
   }
-  STDMETHODIMP ShutdownObject() override { return S_OK; }
+  STDMETHODIMP ShutdownObject() override {
+    if (source_) source_->Shutdown();
+    source_.Reset();
+    return S_OK;
+  }
   STDMETHODIMP DetachObject() override {
     source_.Reset();
     return S_OK;

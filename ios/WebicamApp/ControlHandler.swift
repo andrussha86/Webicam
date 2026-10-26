@@ -26,9 +26,10 @@ final class ControlHandler {
     init() {
         capture.onFrame = { [encoder] pixelBuffer, time in encoder.encode(pixelBuffer, time: time) }
         encoder.onEncoded = { [server] annexB, keyframe, captureUs in
-            server.send(.videoFrame(captureTimeUs: captureUs, keyframe: keyframe, annexB: annexB),
-                        droppable: !keyframe)
+            server.sendVideo(.videoFrame(captureTimeUs: captureUs, keyframe: keyframe, annexB: annexB),
+                             keyframe: keyframe)
         }
+        server.onFrameDropped = { [encoder] in encoder.forceKeyframe() }
         server.onConnectionChange = { [weak self] connected in self?.connectionChanged(connected) }
         server.onMessage = { [weak self] message in self?.handle(message) }
         NotificationCenter.default.addObserver(
@@ -37,11 +38,10 @@ final class ControlHandler {
     }
 
     func start() {
-        do {
-            try server.start()
-        } catch {
-            updateModel { $0.warning = "Не удалось открыть порт: \(error.localizedDescription)" }
+        server.onListenError = { [weak self] error in
+            self?.updateModel { $0.warning = "Не удалось открыть порт: \(error.localizedDescription)" }
         }
+        server.start()
     }
 
     /// The «Стоп»/«Старт» button.

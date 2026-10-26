@@ -137,3 +137,13 @@ TEST(DeviceSession, PartialMessageThenCloseReportsClosed) {
   EXPECT_TRUE(WaitFor([&] { return closed.load(); }));
   EXPECT_EQ(frames.load(), 0);
 }
+
+TEST(DeviceSession, SilentPhoneTimesOut) {
+  Harness h;
+  std::atomic<bool> closed{false};
+  DeviceSession session(std::move(h.pcSide), {.onClosed = [&](std::string) { closed = true; }}, 400);
+  session.Start();
+  h.SendFromPhone(PhoneHello());
+  // The phone never answers pings and sends no frames (app suspended, socket still open).
+  EXPECT_TRUE(WaitFor([&] { return closed.load(); }, 2000ms));
+}

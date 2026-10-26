@@ -38,7 +38,7 @@ int wmain(int argc, wchar_t** argv) {
     UINT32 length = 0;
     devices[i]->GetAllocatedString(MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME, &name, &length);
     std::wprintf(L"camera: %s\n", name ? name : L"?");
-    if (name && std::wstring(name) == L"Webicam" && !source) devices[i]->ActivateObject(IID_PPV_ARGS(&source));
+    if (name && std::wstring(name).starts_with(L"Webicam") && !source) devices[i]->ActivateObject(IID_PPV_ARGS(&source));
     CoTaskMemFree(name);
     devices[i]->Release();
   }
