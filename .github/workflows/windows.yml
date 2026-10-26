@@ -2,6 +2,7 @@ name: windows
 on:
   push:
   pull_request:
+  workflow_call:
 jobs:
   build:
     runs-on: windows-latest
@@ -23,6 +24,8 @@ jobs:
           name: webicam-windows
           path: |
             windows/build/release/app/webicam.exe
+            windows/build/release/tools/vcam-probe/vcam-probe.exe
+            windows/build/release/tools/vcam-check/vcam-check.exe
             windows/build/release/vcam/webicam_vcam.dll
             windows/install.ps1
             windows/uninstall.ps1

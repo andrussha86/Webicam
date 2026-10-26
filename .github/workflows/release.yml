@@ -1,0 +1,28 @@
+name: release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  windows:
+    uses: ./.github/workflows/windows.yml
+  ios:
+    uses: ./.github/workflows/ios.yml
+  publish:
+    needs: [windows, ios]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Package Windows zip
+        run: |
+          mkdir -p Webicam-windows-x64
+          find artifacts/webicam-windows -type f -exec cp {} Webicam-windows-x64/ \;
+          zip -qr Webicam-windows-x64.zip Webicam-windows-x64
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            Webicam-windows-x64.zip
+            artifacts/Webicam-ipa/Webicam.ipa

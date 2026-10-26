@@ -1,0 +1,33 @@
+name: Webicam
+options:
+  bundleIdPrefix: com.webicam
+  deploymentTarget:
+    iOS: "17.0"
+packages:
+  WebicamCore:
+    path: WebicamCore
+targets:
+  Webicam:
+    type: application
+    platform: iOS
+    sources: [WebicamApp]
+    dependencies:
+      - package: WebicamCore
+    info:
+      path: WebicamApp/Info.plist
+      properties:
+        CFBundleDisplayName: Webicam
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        NSCameraUsageDescription: "Webicam передаёт видео с камеры на компьютер."
+        UILaunchScreen: {}
+        UIRequiresFullScreen: true
+        UIStatusBarHidden: true
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.webicam.app
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_VERSION: "5.0"
+        CODE_SIGNING_ALLOWED: "NO"
+        CODE_SIGNING_REQUIRED: "NO"
