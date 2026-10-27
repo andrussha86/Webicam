@@ -62,7 +62,8 @@ struct WifiBrowser::State {
   bool running = false;
   bool browsing = false;
   std::chrono::steady_clock::time_point browseStarted;
-  DNS_SERVICE_CANCEL browseCancel{};
+  // DNS-SD keeps writing to the cancel handle until the browse is cancelled, so it lives on the heap.
+  std::unique_ptr<DNS_SERVICE_CANCEL> browseCancel;
   std::vector<Entry> entries;
   // Handed to DNS-SD as the browse context; outlives every browse callback.
   std::weak_ptr<State>* self = nullptr;
@@ -73,6 +74,7 @@ namespace {
 struct ResolveContext {
   std::weak_ptr<WifiBrowser::State> state;
   std::wstring instance;
+  DNS_SERVICE_CANCEL cancel{};  // must stay valid until the resolve completes
 };
 
 void WINAPI OnResolved(DWORD status, PVOID context, PDNS_SERVICE_INSTANCE instance) {
@@ -123,8 +125,7 @@ void Resolve(const std::shared_ptr<WifiBrowser::State>& state, const std::wstrin
   request.QueryName = const_cast<PWSTR>(ctx->instance.c_str());
   request.pResolveCompletionCallback = OnResolved;
   request.pQueryContext = ctx;
-  DNS_SERVICE_CANCEL cancel{};
-  if (DnsServiceResolve(&request, &cancel) != DNS_REQUEST_PENDING) {
+  if (DnsServiceResolve(&request, &ctx->cancel) != DNS_REQUEST_PENDING) {
     delete ctx;
     std::lock_guard lock(state->mutex);
     auto entry = std::ranges::find(state->entries, instance, &WifiBrowser::State::Entry::instance);
@@ -155,30 +156,44 @@ void WINAPI OnBrowse(DWORD status, PVOID context, PDNS_RECORD records) {
 }
 
 // Restarts the browse when it ended or is due; call without the state's lock.
+// Cancels a running browse and frees its handle; call without the state's lock.
+void CancelBrowse(std::unique_ptr<DNS_SERVICE_CANCEL> cancel, bool browsing) {
+  if (cancel && browsing) DnsServiceBrowseCancel(cancel.get());
+}
+
 void Rebrowse(const std::shared_ptr<WifiBrowser::State>& state, bool force) {
-  DNS_SERVICE_CANCEL old{};
-  bool cancelOld = false;
+  std::unique_ptr<DNS_SERVICE_CANCEL> old;
+  bool wasBrowsing = false;
   {
     std::lock_guard lock(state->mutex);
     if (!state->running) return;
     const auto now = std::chrono::steady_clock::now();
     if (!force && state->browsing && now - state->browseStarted < kRebrowseInterval) return;
-    cancelOld = state->browsing;
-    old = state->browseCancel;
+    wasBrowsing = state->browsing;
+    old = std::move(state->browseCancel);
     state->browsing = false;
     state->browseStarted = now;
   }
-  if (cancelOld) DnsServiceBrowseCancel(&old);
+  CancelBrowse(std::move(old), wasBrowsing);
   DNS_SERVICE_BROWSE_REQUEST request{};
   request.Version = DNS_QUERY_REQUEST_VERSION1;
   request.QueryName = kServiceQuery;
   request.pBrowseCallback = OnBrowse;
   request.pQueryContext = state->self;
-  DNS_SERVICE_CANCEL cancel{};
-  const bool pending = DnsServiceBrowse(&request, &cancel) == DNS_REQUEST_PENDING;
-  std::lock_guard lock(state->mutex);
-  state->browsing = pending;
-  state->browseCancel = cancel;
+  auto cancel = std::make_unique<DNS_SERVICE_CANCEL>();
+  const bool pending = DnsServiceBrowse(&request, cancel.get()) == DNS_REQUEST_PENDING;
+  std::unique_ptr<DNS_SERVICE_CANCEL> stale;
+  {
+    std::lock_guard lock(state->mutex);
+    // Another Rebrowse or Stop may have run meanwhile; keep only one browse alive.
+    if (state->running && !state->browsing) {
+      state->browsing = pending;
+      state->browseCancel = std::move(cancel);
+    } else {
+      stale = std::move(cancel);
+    }
+  }
+  CancelBrowse(std::move(stale), pending);
 }
 
 }  // namespace
@@ -201,16 +216,16 @@ bool WifiBrowser::Start() {
 }
 
 void WifiBrowser::Stop() {
-  DNS_SERVICE_CANCEL cancel{};
+  std::unique_ptr<DNS_SERVICE_CANCEL> cancel;
   bool browsing = false;
   {
     std::lock_guard lock(state_->mutex);
     state_->running = false;
     browsing = state_->browsing;
-    cancel = state_->browseCancel;
+    cancel = std::move(state_->browseCancel);
     state_->browsing = false;
   }
-  if (browsing) DnsServiceBrowseCancel(&cancel);
+  CancelBrowse(std::move(cancel), browsing);
 }
 
 std::vector<WifiPhone> WifiBrowser::Phones() const {
