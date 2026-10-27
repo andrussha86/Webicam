@@ -36,6 +36,8 @@ void DeviceSession::SendConfigure(const proto::Configure& configure) { Send(conf
 
 void DeviceSession::SendCameraSettings(const proto::CameraSettings& settings) { Send(settings); }
 
+void DeviceSession::SendBackgroundImage(std::vector<uint8_t> jpeg) { Send(proto::BackgroundImage{std::move(jpeg)}); }
+
 void DeviceSession::RequestKeyframe() { Send(proto::RequestKeyframe{}); }
 
 std::optional<int64_t> DeviceSession::PhoneToPcUs(uint64_t phoneUs) const {

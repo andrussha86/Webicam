@@ -42,6 +42,7 @@ class DeviceSession {
   void Start();
   void SendConfigure(const proto::Configure& configure);
   void SendCameraSettings(const proto::CameraSettings& settings);
+  void SendBackgroundImage(std::vector<uint8_t> jpeg);
   void RequestKeyframe();
   std::optional<int64_t> PhoneToPcUs(uint64_t phoneUs) const;
   bool Closed() const { return closed_.load(); }

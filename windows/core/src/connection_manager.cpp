@@ -76,20 +76,63 @@ std::string ConnectionManager::Model() const {
 }
 
 void ConnectionManager::SetDesiredConfigure(const proto::Configure& configure) {
-  std::lock_guard lock(mutex_);
-  desired_ = configure;
-  desiredExplicit_ = true;
-  if (session_ && streaming_) {
-    session_->SendConfigure(configure);
-    session_->SendCameraSettings(camera_);
+  {
+    std::lock_guard lock(mutex_);
+    desired_ = configure;
+    desiredExplicit_ = true;
   }
+  SendSetup(configure, true);
 }
 
 void ConnectionManager::SetDesiredCamera(const proto::CameraSettings& settings) {
+  bool pictureNeeded = false;
+  {
+    std::lock_guard lock(mutex_);
+    if (settings == camera_) return;
+    pictureNeeded = settings.backgroundMode == proto::BackgroundMode::Image &&
+                    camera_.backgroundMode != proto::BackgroundMode::Image;
+    camera_ = settings;
+  }
+  SendSetup(std::nullopt, pictureNeeded);
+}
+
+void ConnectionManager::SetBackgroundSource(std::function<std::vector<uint8_t>(uint16_t, uint16_t)> source) {
+  backgroundSource_ = std::move(source);
+}
+
+void ConnectionManager::InvalidateBackground() {
+  proto::Configure size;
+  {
+    std::lock_guard lock(mutex_);
+    if (!session_ || !streaming_ || camera_.backgroundMode != proto::BackgroundMode::Image) return;
+    size = desired_;
+  }
+  auto jpeg = backgroundSource_ ? backgroundSource_(size.width, size.height) : std::vector<uint8_t>{};
   std::lock_guard lock(mutex_);
-  if (settings == camera_) return;
-  camera_ = settings;
-  if (session_ && streaming_) session_->SendCameraSettings(settings);
+  if (session_ && streaming_ && camera_.backgroundMode == proto::BackgroundMode::Image) {
+    session_->SendBackgroundImage(std::move(jpeg));
+  }
+}
+
+void ConnectionManager::SendSetup(std::optional<proto::Configure> configure, bool sendPicture) {
+  proto::Configure size;
+  bool picture = false;
+  {
+    std::lock_guard lock(mutex_);
+    if (!session_ || !streaming_) return;
+    size = desired_;
+    picture = sendPicture && camera_.backgroundMode == proto::BackgroundMode::Image;
+  }
+  std::vector<uint8_t> jpeg;
+  if (picture && backgroundSource_) jpeg = backgroundSource_(size.width, size.height);
+  std::lock_guard lock(mutex_);
+  if (!session_ || !streaming_) return;
+  if (configure) session_->SendConfigure(*configure);
+  // Mode may have changed while rendering; the settings below always win on the phone.
+  if (picture && camera_.backgroundMode == proto::BackgroundMode::Image) {
+    session_->SendBackgroundImage(std::move(jpeg));
+  }
+  session_->SendCameraSettings(camera_);
 }
 
 proto::CameraSettings ConnectionManager::DesiredCamera() const {
@@ -141,11 +184,7 @@ void ConnectionManager::Attach(Socket socket) {
       detail_ = "Подключено: " + (hello.model.empty() ? std::string("iPhone") : hello.model);
     }
     if (callbacks_.onConnectionChanged) callbacks_.onConnectionChanged(true);
-    std::lock_guard lock(mutex_);
-    if (session_) {
-      session_->SendConfigure(*configure);
-      session_->SendCameraSettings(camera_);
-    }
+    SendSetup(configure, true);
   };
   events.onFrame = [this](proto::VideoFrame&& frame) {
     if (callbacks_.onFrame) callbacks_.onFrame(std::move(frame));

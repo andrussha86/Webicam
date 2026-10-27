@@ -52,6 +52,11 @@ class ConnectionManager {
   proto::CameraSettings DesiredCamera() const;
   // Last CameraState from the phone; nullopt until one arrives on the current connection.
   std::optional<proto::CameraState> PhoneCamera() const;
+  // JPEG of the background picture scaled to width×height (empty = none). Called whenever the phone
+  // needs the picture, never under the manager's lock. Set before Start().
+  void SetBackgroundSource(std::function<std::vector<uint8_t>(uint16_t width, uint16_t height)> source);
+  // The picture changed: resend it if the background mode is Image and a phone is streaming.
+  void InvalidateBackground();
   void RequestKeyframe();
   std::optional<int64_t> PhoneToPcUs(uint64_t phoneUs) const;
 
@@ -60,6 +65,11 @@ class ConnectionManager {
   void TryConnect();
   void Attach(Socket socket);
   void SetState(ConnState state, std::string detail);
+  // Configure (optional), then the background picture when the mode needs it, then CameraSettings;
+  // the picture is rendered before the lock is taken.
+  void SendSetup(std::optional<proto::Configure> configure, bool sendPicture);
+
+  std::function<std::vector<uint8_t>(uint16_t, uint16_t)> backgroundSource_;
 
   Callbacks callbacks_;
   UsbmuxClient usbmux_;
