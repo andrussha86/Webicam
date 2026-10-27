@@ -1,4 +1,4 @@
-# Registers the Webicam virtual camera (run once, as Administrator).
+﻿# Registers the Webicam virtual camera (run once, as Administrator).
 # Frame Server loads the DLL as LOCAL SERVICE, which cannot read user profile
 # folders, so the DLL is copied to Program Files first.
 param([string]$Source = $PSScriptRoot)
