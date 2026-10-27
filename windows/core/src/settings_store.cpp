@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include <charconv>
+#include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <sstream>
@@ -35,63 +36,109 @@ bool ParseBool(std::string_view text, bool& out) {
 
 }  // namespace
 
-std::string SerializeSettings(const StoredSettings& s) {
-  std::ostringstream out;
-  if (s.configure) {
-    out << "width=" << s.configure->width << "\n"
-        << "height=" << s.configure->height << "\n"
-        << "fps=" << unsigned(s.configure->fps) << "\n"
-        << "bitrate_kbps=" << s.configure->bitrateKbps << "\n";
+void AppendConfigureKeys(std::string& out, const proto::Configure& c) {
+  out += "width=" + std::to_string(c.width) + "\n";
+  out += "height=" + std::to_string(c.height) + "\n";
+  out += "fps=" + std::to_string(c.fps) + "\n";
+  out += "bitrate_kbps=" + std::to_string(c.bitrateKbps) + "\n";
+}
+
+bool ParseConfigureKey(std::string_view key, std::string_view value, proto::Configure& c) {
+  unsigned u = 0;
+  if (key == "width") return ParseNumber(value, c.width);
+  if (key == "height") return ParseNumber(value, c.height);
+  if (key == "fps") return ParseNumber(value, u) && u <= 255 && (c.fps = uint8_t(u), true);
+  if (key == "bitrate_kbps") return ParseNumber(value, c.bitrateKbps);
+  return false;
+}
+
+void AppendCameraKeys(std::string& out, const proto::CameraSettings& c) {
+  char color[8];
+  std::snprintf(color, sizeof(color), "%06X", unsigned(c.backgroundColor));
+  out += "lens=" + std::to_string(unsigned(c.lens)) + "\n";
+  out += "zoom=" + F(c.zoom) + "\n";
+  out += "manual_exposure=" + std::to_string(c.manualExposure) + "\n";
+  out += "iso=" + F(c.iso) + "\n";
+  out += "shutter_us=" + std::to_string(c.shutterUs) + "\n";
+  out += "exposure_bias=" + F(c.exposureBias) + "\n";
+  out += "manual_wb=" + std::to_string(c.manualWhiteBalance) + "\n";
+  out += "temperature_k=" + F(c.temperatureK) + "\n";
+  out += "tint=" + F(c.tint) + "\n";
+  out += "manual_focus=" + std::to_string(c.manualFocus) + "\n";
+  out += "lens_position=" + F(c.lensPosition) + "\n";
+  out += "blur=" + std::to_string(unsigned(c.blur)) + "\n";
+  out += "rotate180=" + std::to_string(c.rotate180) + "\n";
+  out += "face_focus=" + std::to_string(c.faceFocus) + "\n";
+  out += "background_mode=" + std::to_string(unsigned(c.backgroundMode)) + "\n";
+  out += std::string("background_color=") + color + "\n";
+}
+
+bool ParseCameraKey(std::string_view key, std::string_view value, proto::CameraSettings& c) {
+  unsigned u = 0;
+  if (key == "lens") return ParseNumber(value, u) && u < unsigned(proto::kLensCount) && (c.lens = proto::Lens(u), true);
+  if (key == "zoom") return ParseNumber(value, c.zoom);
+  if (key == "manual_exposure") return ParseBool(value, c.manualExposure);
+  if (key == "iso") return ParseNumber(value, c.iso);
+  if (key == "shutter_us") return ParseNumber(value, c.shutterUs);
+  if (key == "exposure_bias") return ParseNumber(value, c.exposureBias);
+  if (key == "manual_wb") return ParseBool(value, c.manualWhiteBalance);
+  if (key == "temperature_k") return ParseNumber(value, c.temperatureK);
+  if (key == "tint") return ParseNumber(value, c.tint);
+  if (key == "manual_focus") return ParseBool(value, c.manualFocus);
+  if (key == "lens_position") return ParseNumber(value, c.lensPosition);
+  if (key == "blur") return ParseNumber(value, u) && u <= 100 && (c.blur = uint8_t(u), true);
+  if (key == "rotate180") return ParseBool(value, c.rotate180);
+  if (key == "face_focus") return ParseBool(value, c.faceFocus);
+  if (key == "background_mode") {
+    return ParseNumber(value, u) && u < unsigned(proto::kBackgroundModeCount) &&
+           (c.backgroundMode = proto::BackgroundMode(u), true);
   }
-  const auto& c = s.camera;
-  out << "lens=" << unsigned(c.lens) << "\n"
-      << "zoom=" << F(c.zoom) << "\n"
-      << "manual_exposure=" << c.manualExposure << "\n"
-      << "iso=" << F(c.iso) << "\n"
-      << "shutter_us=" << c.shutterUs << "\n"
-      << "exposure_bias=" << F(c.exposureBias) << "\n"
-      << "manual_wb=" << c.manualWhiteBalance << "\n"
-      << "temperature_k=" << F(c.temperatureK) << "\n"
-      << "tint=" << F(c.tint) << "\n"
-      << "manual_focus=" << c.manualFocus << "\n"
-      << "lens_position=" << F(c.lensPosition) << "\n"
-      << "blur=" << unsigned(c.blur) << "\n"
-      << "rotate180=" << c.rotate180 << "\n";
-  return out.str();
+  if (key == "background_color") {
+    uint32_t color = 0;
+    const auto [end, ec] = std::from_chars(value.data(), value.data() + value.size(), color, 16);
+    if (value.size() != 6 || ec != std::errc() || end != value.data() + value.size()) return false;
+    c.backgroundColor = color;
+    return true;
+  }
+  return false;
+}
+
+void ApplyLegacyBackground(proto::CameraSettings& c, bool sawBackgroundMode) {
+  if (!sawBackgroundMode) c.backgroundMode = c.blur > 0 ? proto::BackgroundMode::Blur : proto::BackgroundMode::Off;
+}
+
+std::string SerializeSettings(const StoredSettings& s) {
+  std::string out;
+  if (s.configure) AppendConfigureKeys(out, *s.configure);
+  AppendCameraKeys(out, s.camera);
+  out += "background_image=" + s.backgroundImage + "\n";
+  if (!s.preset.empty()) out += "preset=" + s.preset + "\n";
+  return out;
 }
 
 StoredSettings ParseSettings(std::string_view text) {
   StoredSettings s;
   proto::Configure configure{0, 0, 0, 0};
-  auto& c = s.camera;
+  bool sawBackgroundMode = false;
   while (!text.empty()) {
     const size_t eol = text.find('\n');
     std::string_view line = text.substr(0, eol);
     text = eol == std::string_view::npos ? std::string_view() : text.substr(eol + 1);
-    if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
+    if (!line.empty() && line.back() == '') line.remove_suffix(1);
     const size_t eq = line.find('=');
     if (eq == std::string_view::npos) continue;
     const auto key = line.substr(0, eq);
     const auto value = line.substr(eq + 1);
-    unsigned u = 0;
-    if (key == "width") ParseNumber(value, configure.width);
-    else if (key == "height") ParseNumber(value, configure.height);
-    else if (key == "fps" && ParseNumber(value, u) && u <= 255) configure.fps = uint8_t(u);
-    else if (key == "bitrate_kbps") ParseNumber(value, configure.bitrateKbps);
-    else if (key == "lens" && ParseNumber(value, u) && u < unsigned(proto::kLensCount)) c.lens = proto::Lens(u);
-    else if (key == "zoom") ParseNumber(value, c.zoom);
-    else if (key == "manual_exposure") ParseBool(value, c.manualExposure);
-    else if (key == "iso") ParseNumber(value, c.iso);
-    else if (key == "shutter_us") ParseNumber(value, c.shutterUs);
-    else if (key == "exposure_bias") ParseNumber(value, c.exposureBias);
-    else if (key == "manual_wb") ParseBool(value, c.manualWhiteBalance);
-    else if (key == "temperature_k") ParseNumber(value, c.temperatureK);
-    else if (key == "tint") ParseNumber(value, c.tint);
-    else if (key == "manual_focus") ParseBool(value, c.manualFocus);
-    else if (key == "lens_position") ParseNumber(value, c.lensPosition);
-    else if (key == "blur" && ParseNumber(value, u) && u <= 100) c.blur = uint8_t(u);
-    else if (key == "rotate180") ParseBool(value, c.rotate180);
+    if (ParseConfigureKey(key, value, configure)) continue;
+    if (ParseCameraKey(key, value, s.camera)) {
+      sawBackgroundMode |= key == "background_mode";
+    } else if (key == "background_image" && !value.empty()) {
+      s.backgroundImage = std::string(value);
+    } else if (key == "preset") {
+      s.preset = std::string(value);
+    }
   }
+  ApplyLegacyBackground(s.camera, sawBackgroundMode);
   if (configure.width && configure.height && configure.fps && configure.bitrateKbps) s.configure = configure;
   return s;
 }

@@ -26,3 +26,30 @@ TEST(SettingsStore, BadValuesFallBackPerField) {
   EXPECT_EQ(parsed.camera.tint, 7.0f);
   EXPECT_FALSE(parsed.configure);  // incomplete
 }
+
+TEST(SettingsStore, RoundTripV3) {
+  StoredSettings s;
+  s.configure = proto::Configure{1280, 720, 30, 4000};
+  s.camera.faceFocus = true;
+  s.camera.backgroundMode = proto::BackgroundMode::Color;
+  s.camera.backgroundColor = 0x336699;
+  s.backgroundImage = "builtin:5";
+  s.preset = "Мой стол";
+  EXPECT_EQ(ParseSettings(SerializeSettings(s)), s);
+}
+
+TEST(SettingsStore, LegacyBlurMapsToBlurMode) {
+  const auto s = ParseSettings("blur=40\n");
+  EXPECT_EQ(s.camera.backgroundMode, proto::BackgroundMode::Blur);
+  EXPECT_EQ(s.camera.blur, 40);
+}
+
+TEST(SettingsStore, LegacyNoBlurIsOff) {
+  EXPECT_EQ(ParseSettings("blur=0\n").camera.backgroundMode, proto::BackgroundMode::Off);
+}
+
+TEST(SettingsStore, BadBackgroundModeIgnored) {
+  const auto s = ParseSettings("background_mode=9\nbackground_color=zz\n");
+  EXPECT_EQ(s.camera.backgroundMode, proto::BackgroundMode::Off);
+  EXPECT_EQ(s.camera.backgroundColor, proto::CameraSettings{}.backgroundColor);
+}
