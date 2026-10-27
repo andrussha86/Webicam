@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreMotion
 import WebicamCore
 
 enum CaptureError: Error {
@@ -7,7 +8,7 @@ enum CaptureError: Error {
 }
 
 /// Selected lens → NV12 (420v) pixel buffers with host-clock timestamps, with the PC's
-/// manual controls and optional background replacement applied.
+/// manual controls, orientation, mirroring, zoomed area and optional background replacement applied.
 final class CaptureEngine: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     var onFrame: ((CVPixelBuffer, CMTime) -> Void)?
     /// The background picture cannot be shown; called on the capture queue.
@@ -20,17 +21,31 @@ final class CaptureEngine: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
     private let output = AVCaptureVideoDataOutput()
     private let queue = DispatchQueue(label: "webicam.capture", qos: .userInteractive)
     private let compositor = BackgroundCompositor()
+    private let motion = CMMotionManager()
+    private let motionQueue = OperationQueue()
     private var configured = false
     // Owned by `queue`.
     private var input: AVCaptureDeviceInput?
+    /// Output size; portrait (height > width) is a landscape capture format turned by 90°.
     private var format: (width: Int, height: Int, fps: Int)?
     private var settings = CameraSettings()
     private var activeLens: Lens?
+    /// How the phone is held, as the videoRotationAngle that shows the scene upright; nil until known.
+    private var heldAngle: Int?
+    /// Rotation.auto's current choice.
+    private var autoFlipped = false
 
-    private static let sizes: [(Int32, Int32)] = [(1280, 720), (1920, 1080), (3840, 2160)]
+    /// 16:9 and the sensor's native 4:3, landscape as the sensor delivers them.
+    private static let sizes: [(Int32, Int32)] = [(1280, 720), (1920, 1080), (3840, 2160),
+                                                  (1280, 960), (1440, 1080), (1920, 1440)]
     private static let pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
     /// Digital zoom allowed on top of a lens, beyond that the picture is mush.
     private static let maxDigitalZoom: CGFloat = 5
+
+    override init() {
+        super.init()
+        motionQueue.maxConcurrentOperationCount = 1
+    }
 
     static func device(for lens: Lens) -> AVCaptureDevice? {
         switch lens {
@@ -46,7 +61,7 @@ final class CaptureEngine: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         device(for: lens) != nil ? mask | (1 << lens.rawValue) : mask
     }
 
-    /// Supported 720p/1080p/4K formats of the main camera with their highest frame rate (≤ 60).
+    /// Supported 16:9 and 4:3 formats of the main camera with their highest frame rate (≤ 60).
     var supportedFormats: [CaptureFormat] {
         guard let device = Self.device(for: .wide) else { return [] }
         var best: [String: CaptureFormat] = [:]
@@ -58,7 +73,7 @@ final class CaptureEngine: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
                 best[key] = CaptureFormat(width: UInt16(d.width), height: UInt16(d.height), maxFps: fps)
             }
         }
-        return best.values.sorted { $0.width < $1.width }
+        return best.values.sorted { ($0.width, $0.height) < ($1.width, $1.height) }
     }
 
     private static func isUsable(_ format: AVCaptureDevice.Format) -> Bool {
@@ -71,8 +86,8 @@ final class CaptureEngine: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         format.videoSupportedFrameRateRanges.map(\.maxFrameRate).max() ?? 0
     }
 
-    /// Sets the stream format on the current lens. Returns the frame rate actually used:
-    /// a lens that can't reach `fps` at this size runs at its own maximum.
+    /// Sets the stream format on the current lens; `height > width` streams portrait. Returns the frame
+    /// rate actually used: a lens that can't reach `fps` at this size runs at its own maximum.
     @discardableResult
     func configure(width: Int, height: Int, fps: Int) throws -> Int {
         try queue.sync {
@@ -91,7 +106,10 @@ final class CaptureEngine: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
     func apply(_ new: CameraSettings) throws {
         try queue.sync {
             let previousLens = settings.lens
-            if new.backgroundMode != settings.backgroundMode { compositor.reset() }
+            if new.backgroundMode != settings.backgroundMode || new.rotation != settings.rotation
+                || new.mirrorHorizontal != settings.mirrorHorizontal || new.mirrorVertical != settings.mirrorVertical {
+                compositor.reset()
+            }
             settings = new
             guard format != nil else { return }
             if Self.device(for: new.lens)?.uniqueID != input?.device.uniqueID || activeLens == nil {
@@ -127,7 +145,7 @@ final class CaptureEngine: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
             s.shutterMaxUs = Self.microseconds(Self.longestExposure(device))
             s.biasMin = device.minExposureTargetBias
             s.biasMax = device.maxExposureTargetBias
-            s.zoomMax = Float(Self.zoomLimit(device, activeLens) / Self.baseZoom(activeLens))
+            s.zoomMax = Float(Self.maxDigitalZoom)
             s.manualFocusSupported = device.isLockingFocusWithCustomLensPositionSupported
             s.iso = device.iso
             s.shutterUs = Self.microseconds(device.exposureDuration)
@@ -138,19 +156,22 @@ final class CaptureEngine: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
             s.reactionsSupported = format.reactionEffectsSupported
             s.reactionsEnabled = AVCaptureDevice.reactionEffectsEnabled
             s.gesturesEnabled = AVCaptureDevice.reactionEffectGesturesEnabled
+            s.flipped = flipped
             return s
         }
     }
 
     func start() {
-        queue.async { [session] in
+        queue.async { [self] in
             if !session.isRunning { session.startRunning() }
+            startMotion()
         }
     }
 
     func stop() {
-        queue.async { [session] in
+        queue.async { [self] in
             if session.isRunning { session.stopRunning() }
+            motion.stopDeviceMotionUpdates()
         }
     }
 
@@ -169,7 +190,10 @@ final class CaptureEngine: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
     /// Switches the session to `lens` with the current format and re-applies every control.
     private func activate(lens: Lens) throws -> Int {
         guard let current = format else { return 0 }
-        let (width, height, fps) = current
+        // The sensor delivers landscape; portrait is the same format turned on the connection.
+        let width = max(current.width, current.height)
+        let height = min(current.width, current.height)
+        let fps = current.fps
         guard let device = Self.device(for: lens) else { throw CaptureError.noCamera }
         let candidates = device.formats.filter { format in
             let d = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
@@ -209,6 +233,7 @@ final class CaptureEngine: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         activeLens = lens
         applyControls(device)
         device.unlockForConfiguration()
+        updateAutoFlip()
         applyRotation()
         return effectiveFps
     }
@@ -227,8 +252,10 @@ final class CaptureEngine: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         let s = settings
         let format = device.activeFormat
 
-        let zoom = Self.baseZoom(s.lens) * CGFloat(max(s.zoom, 1))
-        device.videoZoomFactor = min(max(zoom, device.minAvailableVideoZoomFactor), Self.zoomLimit(device, s.lens))
+        // The user's zoom is a crop the compositor makes, so the area can be moved; the lens stays at its
+        // own factor (2× for the 48 MP crop).
+        device.videoZoomFactor = min(max(Self.baseZoom(s.lens), device.minAvailableVideoZoomFactor),
+                                     device.maxAvailableVideoZoomFactor)
 
         if s.manualExposure && device.isExposureModeSupported(.custom) {
             let requested = CMTime(value: CMTimeValue(s.shutterUs), timescale: 1_000_000)
@@ -270,19 +297,82 @@ final class CaptureEngine: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         device.isFaceDrivenAutoExposureEnabled = s.faceFocus && !s.manualExposure
     }
 
+    /// The picture turned by 180° on top of the format's own orientation.
+    private var flipped: Bool {
+        switch settings.rotation {
+        case .upright: return false
+        case .flipped: return true
+        case .auto: return autoFlipped
+        }
+    }
+
+    /// Landscape output is upright at 0° (sensor-native), portrait at 90°. Mirroring top to bottom is
+    /// a 180° turn plus a left-right mirror, so both mirrors are done by the connection, for free.
     private func applyRotation() {
-        let angle: CGFloat = settings.rotate180 ? 180 : 0  // landscape, sensor-native
-        if let connection = output.connection(with: .video), connection.isVideoRotationAngleSupported(angle) {
+        guard let format, let connection = output.connection(with: .video) else { return }
+        let base = format.height > format.width ? 90 : 0
+        let turns = (flipped ? 180 : 0) + (settings.mirrorVertical ? 180 : 0)
+        let angle = CGFloat((base + turns) % 360)
+        if connection.isVideoRotationAngleSupported(angle) {
             connection.videoRotationAngle = angle
         }
+        if connection.isVideoMirroringSupported {
+            connection.automaticallyAdjustsVideoMirroring = false
+            connection.isVideoMirrored = settings.mirrorHorizontal != settings.mirrorVertical
+        }
+    }
+
+    // MARK: - Orientation (on `queue`)
+
+    /// Gravity rather than UIDevice orientation: it works with the rotation lock on and the app's UI
+    /// fixed to portrait.
+    private func startMotion() {
+        guard motion.isDeviceMotionAvailable, !motion.isDeviceMotionActive else { return }
+        motion.deviceMotionUpdateInterval = 0.2
+        motion.startDeviceMotionUpdates(to: motionQueue) { [weak self] data, _ in
+            guard let self, let gravity = data?.gravity, let angle = Self.uprightAngle(gravity) else { return }
+            self.queue.async { self.held(angle) }
+        }
+    }
+
+    private func held(_ angle: Int) {
+        guard angle != heldAngle else { return }
+        heldAngle = angle
+        updateAutoFlip()
+    }
+
+    /// Auto only chooses between upright and 180° for the format's orientation; holding the phone the
+    /// other way round (portrait while streaming landscape) keeps the last choice.
+    private func updateAutoFlip() {
+        guard let format, let heldAngle else { return }
+        let upright = format.height > format.width ? 90 : 0
+        let choice: Bool
+        if heldAngle == upright {
+            choice = false
+        } else if heldAngle == (upright + 180) % 360 {
+            choice = true
+        } else {
+            return
+        }
+        guard choice != autoFlipped else { return }
+        autoFlipped = choice
+        if settings.rotation == .auto {
+            compositor.reset()
+            applyRotation()
+        }
+    }
+
+    /// The videoRotationAngle that shows the scene upright for gravity in device coordinates (the same
+    /// for the front and back cameras); nil while the phone lies flat or sits between two orientations.
+    private static func uprightAngle(_ g: CMAcceleration) -> Int? {
+        if abs(g.z) > 0.8 { return nil }
+        if abs(g.x) > 0.6 && abs(g.x) > abs(g.y) { return g.x < 0 ? 0 : 180 }
+        if abs(g.y) > 0.6 && abs(g.y) > abs(g.x) { return g.y < 0 ? 90 : 270 }
+        return nil
     }
 
     /// 2× is the main camera's 48 MP sensor cropped, everything else starts at 1×.
     private static func baseZoom(_ lens: Lens) -> CGFloat { lens == .wide2x ? 2 : 1 }
-
-    private static func zoomLimit(_ device: AVCaptureDevice, _ lens: Lens) -> CGFloat {
-        min(device.maxAvailableVideoZoomFactor, baseZoom(lens) * maxDigitalZoom)
-    }
 
     /// A manual exposure can't be longer than one frame without lowering the frame rate.
     private static func longestExposure(_ device: AVCaptureDevice) -> CMTime {

@@ -3,10 +3,11 @@ import XCTest
 
 /// Expected values of shared/testvectors/*.bin (mirrors windows/core/include/webicam/testvectors.h).
 private let vectors: [(String, Message)] = [
-    ("hello_pc.bin", .hello(version: 3, model: nil, formats: [])),
-    ("hello_phone.bin", .hello(version: 3, model: "iPhone16,1", formats: [
+    ("hello_pc.bin", .hello(version: 4, model: nil, formats: [])),
+    ("hello_phone.bin", .hello(version: 4, model: "iPhone16,1", formats: [
         CaptureFormat(width: 1280, height: 720, maxFps: 60),
         CaptureFormat(width: 1920, height: 1080, maxFps: 60),
+        CaptureFormat(width: 1920, height: 1440, maxFps: 60),
         CaptureFormat(width: 3840, height: 2160, maxFps: 30),
     ])),
     ("configure_1080p60.bin", .configure(width: 1920, height: 1080, fps: 60, bitrateKbps: 25000)),
@@ -30,10 +31,13 @@ private let vectors: [(String, Message)] = [
         c.manualFocus = true
         c.lensPosition = 0.25
         c.blur = 60
-        c.rotate180 = true
+        c.rotation = .flipped
         c.faceFocus = true
         c.backgroundMode = .image
         c.backgroundColor = 0x336699
+        c.mirrorHorizontal = true
+        c.panX = 0.25
+        c.panY = 0.75
         return c
     }())),
     ("camera_state.bin", .cameraState({
@@ -55,6 +59,7 @@ private let vectors: [(String, Message)] = [
         c.lensPosition = 0.75
         c.reactionsSupported = true
         c.reactionsEnabled = true
+        c.flipped = true
         return c
     }())),
     ("background_image.bin", .backgroundImage(Data([0xFF, 0xD8, 0xFF]))),
@@ -104,8 +109,8 @@ final class ProtocolTests: XCTestCase {
         XCTAssertThrowsError(try parser.next())
     }
 
-    /// camera_settings.bin with payload bytes replaced; v2 fields take 34 bytes, then
-    /// face_focus (34), background_mode (35), background_color (36...39).
+    /// camera_settings.bin with payload bytes replaced; rotation (33), face_focus (34),
+    /// background_mode (35), background_color (36...39), mirrors (40, 41), pan (42...49).
     private func settingsWith(_ offset: Int, _ patch: [UInt8]) throws -> Data {
         var bytes = [UInt8](try Data(contentsOf: vectorsDir.appendingPathComponent("camera_settings.bin")))
         bytes.replaceSubrange((5 + offset)..<(5 + offset + patch.count), with: patch)
@@ -115,6 +120,12 @@ final class ProtocolTests: XCTestCase {
     func testRejectsBackgroundModeFour() throws {
         var parser = MessageParser()
         parser.feed(try settingsWith(35, [4]))
+        XCTAssertThrowsError(try parser.next())
+    }
+
+    func testRejectsRotationThree() throws {
+        var parser = MessageParser()
+        parser.feed(try settingsWith(33, [3]))
         XCTAssertThrowsError(try parser.next())
     }
 

@@ -95,8 +95,10 @@ public struct MessageParser {
                   let manualExposure = r.bool(), let iso = r.f32(), let shutter = r.u32(), let bias = r.f32(),
                   let manualWb = r.bool(), let temperature = r.f32(), let tint = r.f32(),
                   let manualFocus = r.bool(), let lensPosition = r.f32(), let blur = r.u8(),
-                  let rotate = r.bool(), let face = r.bool(), let rawMode = r.u8(),
+                  let rawRotation = r.u8(), let rotation = Rotation(rawValue: rawRotation),
+                  let face = r.bool(), let rawMode = r.u8(),
                   let mode = BackgroundMode(rawValue: rawMode), let color = r.u32(), color <= 0xFFFFFF,
+                  let mirrorH = r.bool(), let mirrorV = r.bool(), let panX = r.f32(), let panY = r.f32(),
                   r.remaining == 0
             else { return nil }
             c.lens = lens
@@ -111,10 +113,14 @@ public struct MessageParser {
             c.manualFocus = manualFocus
             c.lensPosition = lensPosition
             c.blur = blur
-            c.rotate180 = rotate
+            c.rotation = rotation
             c.faceFocus = face
             c.backgroundMode = mode
             c.backgroundColor = color
+            c.mirrorHorizontal = mirrorH
+            c.mirrorVertical = mirrorV
+            c.panX = panX
+            c.panY = panY
             return .cameraSettings(c)
         case .cameraState:
             var c = CameraState()
@@ -123,7 +129,7 @@ public struct MessageParser {
                   let biasMin = r.f32(), let biasMax = r.f32(), let zoomMax = r.f32(), let focus = r.bool(),
                   let iso = r.f32(), let shutter = r.u32(), let temperature = r.f32(), let tint = r.f32(),
                   let lensPosition = r.f32(), let reactionsSupported = r.bool(), let reactionsEnabled = r.bool(),
-                  let gestures = r.bool(), r.remaining == 0
+                  let gestures = r.bool(), let flipped = r.bool(), r.remaining == 0
             else { return nil }
             c.lenses = lenses
             c.lens = lens
@@ -143,6 +149,7 @@ public struct MessageParser {
             c.reactionsSupported = reactionsSupported
             c.reactionsEnabled = reactionsEnabled
             c.gesturesEnabled = gestures
+            c.flipped = flipped
             return .cameraState(c)
         case .backgroundImage:
             return .backgroundImage(r.rest())

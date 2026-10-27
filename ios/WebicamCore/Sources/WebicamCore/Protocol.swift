@@ -1,8 +1,8 @@
 import Foundation
 
-/// Webicam wire protocol v3 — see shared/protocol.md.
+/// Webicam wire protocol v4 — see shared/protocol.md.
 public enum ProtocolConstants {
-    public static let version: UInt16 = 3
+    public static let version: UInt16 = 4
     public static let phonePort: UInt16 = 47800
     public static let maxPayloadBytes = 16 * 1024 * 1024
 }
@@ -34,6 +34,11 @@ public enum BackgroundMode: UInt8 {
     case off = 0, blur, image, color
 }
 
+/// Auto follows how the phone is held, but only ever turns the picture by 180°.
+public enum Rotation: UInt8 {
+    case auto = 0, upright, flipped
+}
+
 /// Full snapshot of the PC's camera choices; the phone clamps every value to the active lens.
 public struct CameraSettings: Equatable {
     public var lens: Lens = .wide
@@ -48,10 +53,15 @@ public struct CameraSettings: Equatable {
     public var manualFocus = false
     public var lensPosition: Float = 0.5  // 0 near ... 1 far
     public var blur: UInt8 = 0  // 0 off ... 100 strongest
-    public var rotate180 = false
+    public var rotation: Rotation = .auto
     public var faceFocus = false  // face-driven focus/exposure while those are on auto
     public var backgroundMode: BackgroundMode = .off
     public var backgroundColor: UInt32 = 0x1F2125  // 0x00RRGGBB
+    public var mirrorHorizontal = false
+    public var mirrorVertical = false
+    /// Centre of the zoomed area in the output frame, 0...1 from the top left.
+    public var panX: Float = 0.5
+    public var panY: Float = 0.5
 
     public init() {}
 }
@@ -76,6 +86,7 @@ public struct CameraState: Equatable {
     public var reactionsSupported = false  // by the active format
     public var reactionsEnabled = false  // Control Center, Video Effects
     public var gesturesEnabled = false
+    public var flipped = false  // the picture is turned by 180° right now
 
     public init() {}
 }
@@ -153,10 +164,14 @@ public enum Message: Equatable {
             payload.bool(c.manualFocus)
             payload.f32(c.lensPosition)
             payload.u8(c.blur)
-            payload.bool(c.rotate180)
+            payload.u8(c.rotation.rawValue)
             payload.bool(c.faceFocus)
             payload.u8(c.backgroundMode.rawValue)
             payload.u32(c.backgroundColor)
+            payload.bool(c.mirrorHorizontal)
+            payload.bool(c.mirrorVertical)
+            payload.f32(c.panX)
+            payload.f32(c.panY)
         case let .cameraState(c):
             type = .cameraState
             payload.u8(c.lenses)
@@ -177,6 +192,7 @@ public enum Message: Equatable {
             payload.bool(c.reactionsSupported)
             payload.bool(c.reactionsEnabled)
             payload.bool(c.gesturesEnabled)
+            payload.bool(c.flipped)
         case let .backgroundImage(jpeg):
             type = .backgroundImage
             payload.bytes.append(contentsOf: jpeg)
