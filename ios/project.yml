@@ -17,8 +17,8 @@ targets:
       path: WebicamApp/Info.plist
       properties:
         CFBundleDisplayName: Webicam
-        CFBundleShortVersionString: "0.1.0"
-        CFBundleVersion: "1"
+        CFBundleShortVersionString: "0.2.0"
+        CFBundleVersion: "2"
         NSCameraUsageDescription: "Webicam передаёт видео с камеры на компьютер."
         UILaunchScreen: {}
         UIRequiresFullScreen: true

@@ -1,5 +1,6 @@
 #include "webicam/protocol.h"
 
+#include <bit>
 #include <optional>
 
 namespace webicam::proto {
@@ -12,6 +13,8 @@ class Writer {
   void U16(uint16_t v) { Le(v, 2); }
   void U32(uint32_t v) { Le(v, 4); }
   void U64(uint64_t v) { Le(v, 8); }
+  void F32(float v) { U32(std::bit_cast<uint32_t>(v)); }
+  void Bool(bool v) { U8(v ? 1 : 0); }
   void Str(const std::string& s) {
     U16(uint16_t(s.size()));
     out.insert(out.end(), s.begin(), s.end());
@@ -32,6 +35,16 @@ class Reader {
   std::optional<uint16_t> U16() { return Le<uint16_t>(2); }
   std::optional<uint32_t> U32() { return Le<uint32_t>(4); }
   std::optional<uint64_t> U64() { return Le<uint64_t>(8); }
+  std::optional<float> F32() {
+    auto v = U32();
+    if (!v) return std::nullopt;
+    return std::bit_cast<float>(*v);
+  }
+  std::optional<bool> Bool() {
+    auto v = U8();
+    if (!v || *v > 1) return std::nullopt;
+    return *v == 1;
+  }
   std::optional<std::string> Str() {
     auto length = U16();
     if (!length || Remaining() < *length) return std::nullopt;
@@ -118,6 +131,51 @@ std::optional<Message> DecodePayload(MsgType type, std::span<const uint8_t> payl
       if (!state || !thermal || !message || r.Remaining() != 0 || *state > 3) return std::nullopt;
       return Status{StreamState(*state), *thermal, *message};
     }
+    case MsgType::CameraSettings: {
+      auto lens = r.U8();
+      auto zoom = r.F32();
+      auto manualExposure = r.Bool();
+      auto iso = r.F32();
+      auto shutter = r.U32();
+      auto bias = r.F32();
+      auto manualWb = r.Bool();
+      auto temperature = r.F32();
+      auto tint = r.F32();
+      auto manualFocus = r.Bool();
+      auto lensPosition = r.F32();
+      auto blur = r.U8();
+      auto rotate = r.Bool();
+      if (!lens || !zoom || !manualExposure || !iso || !shutter || !bias || !manualWb || !temperature || !tint ||
+          !manualFocus || !lensPosition || !blur || !rotate || r.Remaining() != 0 || *lens >= kLensCount) {
+        return std::nullopt;
+      }
+      return CameraSettings{Lens(*lens), *zoom, *manualExposure, *iso,         *shutter,      *bias, *manualWb,
+                            *temperature, *tint, *manualFocus,    *lensPosition, *blur, *rotate};
+    }
+    case MsgType::CameraState: {
+      auto lenses = r.U8();
+      auto lens = r.U8();
+      auto isoMin = r.F32();
+      auto isoMax = r.F32();
+      auto shutterMin = r.U32();
+      auto shutterMax = r.U32();
+      auto biasMin = r.F32();
+      auto biasMax = r.F32();
+      auto zoomMax = r.F32();
+      auto focus = r.Bool();
+      auto iso = r.F32();
+      auto shutter = r.U32();
+      auto temperature = r.F32();
+      auto tint = r.F32();
+      auto lensPosition = r.F32();
+      if (!lenses || !lens || !isoMin || !isoMax || !shutterMin || !shutterMax || !biasMin || !biasMax || !zoomMax ||
+          !focus || !iso || !shutter || !temperature || !tint || !lensPosition || r.Remaining() != 0 ||
+          *lens >= kLensCount) {
+        return std::nullopt;
+      }
+      return CameraState{*lenses,  Lens(*lens), *isoMin, *isoMax, *shutterMin, *shutterMax,  *biasMin, *biasMax,
+                         *zoomMax, *focus,      *iso,    *shutter, *temperature, *tint, *lensPosition};
+    }
   }
   return std::nullopt;
 }
@@ -167,6 +225,38 @@ std::vector<uint8_t> Encode(const Message& message) {
           payload.U8(uint8_t(m.state));
           payload.U8(m.thermal);
           payload.Str(m.message);
+        } else if constexpr (std::is_same_v<T, CameraSettings>) {
+          type = MsgType::CameraSettings;
+          payload.U8(uint8_t(m.lens));
+          payload.F32(m.zoom);
+          payload.Bool(m.manualExposure);
+          payload.F32(m.iso);
+          payload.U32(m.shutterUs);
+          payload.F32(m.exposureBias);
+          payload.Bool(m.manualWhiteBalance);
+          payload.F32(m.temperatureK);
+          payload.F32(m.tint);
+          payload.Bool(m.manualFocus);
+          payload.F32(m.lensPosition);
+          payload.U8(m.blur);
+          payload.Bool(m.rotate180);
+        } else if constexpr (std::is_same_v<T, CameraState>) {
+          type = MsgType::CameraState;
+          payload.U8(m.lenses);
+          payload.U8(uint8_t(m.lens));
+          payload.F32(m.isoMin);
+          payload.F32(m.isoMax);
+          payload.U32(m.shutterMinUs);
+          payload.U32(m.shutterMaxUs);
+          payload.F32(m.biasMin);
+          payload.F32(m.biasMax);
+          payload.F32(m.zoomMax);
+          payload.Bool(m.manualFocusSupported);
+          payload.F32(m.iso);
+          payload.U32(m.shutterUs);
+          payload.F32(m.temperatureK);
+          payload.F32(m.tint);
+          payload.F32(m.lensPosition);
         }
       },
       message);
@@ -192,7 +282,7 @@ MessageParser::Result MessageParser::Next(Message& out) {
   const uint8_t* head = buffer_.data() + offset_;
   const uint8_t type = head[0];
   const uint32_t length = uint32_t(head[1]) | uint32_t(head[2]) << 8 | uint32_t(head[3]) << 16 | uint32_t(head[4]) << 24;
-  if (type < uint8_t(MsgType::Hello) || type > uint8_t(MsgType::Status) || length > kMaxPayloadBytes) {
+  if (type < uint8_t(MsgType::Hello) || type > uint8_t(MsgType::CameraState) || length > kMaxPayloadBytes) {
     failed_ = true;
     return Result::Error;
   }

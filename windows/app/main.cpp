@@ -10,6 +10,7 @@
 #include <imgui_impl_dx11.h>
 #include <imgui_impl_win32.h>
 
+#include <atomic>
 #include <memory>
 #include <string>
 
@@ -17,7 +18,9 @@
 #include "webicam/connection_manager.h"
 #include "webicam/media_foundation.h"
 #include "webicam/pipeline.h"
+#include "webicam/settings_store.h"
 #include "webicam/single_instance.h"
+#include "webicam/vcam_logic.h"
 #include "webicam/virtual_cam_host.h"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM, LPARAM);
@@ -203,8 +206,20 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
 
   std::mutex statusMutex;
   std::string phoneStatus;
+  // Frames still arriving well after "stopped by user" mean the phone resumed without
+  // telling us (0.1 phones never re-sent their state); stop showing the stale status.
+  std::atomic<uint64_t> stoppedAtMs{0};
   connection = std::make_unique<ConnectionManager>(ConnectionManager::Callbacks{
-      .onFrame = [&](proto::VideoFrame&& frame) { pipeline.OnFrame(std::move(frame)); },
+      .onFrame =
+          [&](proto::VideoFrame&& frame) {
+            const uint64_t stoppedAt = stoppedAtMs.load();
+            if (stoppedAt && SteadyNowMs() - stoppedAt > 1000 && stoppedAtMs.exchange(0)) {
+              pipeline.SetPhoneStreaming(true);
+              std::lock_guard lock(statusMutex);
+              phoneStatus.clear();
+            }
+            pipeline.OnFrame(std::move(frame));
+          },
       .onConnectionChanged =
           [&](bool connected) {
             pipeline.OnConnectionChanged(connected);
@@ -217,6 +232,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
           [&](const proto::Status& status) {
             pipeline.SetPhoneStreaming(status.state == proto::StreamState::Streaming ||
                                        status.state == proto::StreamState::ThermalThrottled);
+            stoppedAtMs = status.state == proto::StreamState::StoppedByUser ? SteadyNowMs() : 0;
             std::lock_guard lock(statusMutex);
             switch (status.state) {
               case proto::StreamState::Streaming: phoneStatus.clear(); break;
@@ -230,6 +246,15 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
   });
   connectionPtr = connection.get();
   if (direct) connection->SetDirect(direct->first, direct->second);
+
+  const auto settingsPath = DefaultSettingsPath();
+  StoredSettings saved = LoadSettings(settingsPath);
+  if (saved.configure) connection->SetDesiredConfigure(*saved.configure);
+  connection->SetDesiredCamera(saved.camera);
+  ui.chosenConfigure = saved.configure;
+  ui.camera = saved.camera;
+  uint64_t settingsChangedMs = 0;
+  auto currentSettings = [&] { return StoredSettings{ui.chosenConfigure, connection->DesiredCamera()}; };
   connection->Start();
 
   while (!g_app.quit) {
@@ -258,8 +283,20 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     g_app.d3d.context->ClearRenderTargetView(g_app.renderTarget.Get(), clear);
     ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
     g_app.swapChain->Present(1, 0);
+
+    // Saved a second after the last change, so dragging a slider doesn't hit the disk.
+    if (currentSettings() != saved) {
+      const uint64_t now = SteadyNowMs();
+      if (!settingsChangedMs) settingsChangedMs = now;
+      if (now - settingsChangedMs >= 1000) {
+        saved = currentSettings();
+        SaveSettings(settingsPath, saved);
+        settingsChangedMs = 0;
+      }
+    }
   }
 
+  if (currentSettings() != saved) SaveSettings(settingsPath, currentSettings());
   connection->Stop();
   connection.reset();
   camera.Stop();

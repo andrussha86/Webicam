@@ -24,6 +24,7 @@ class DeviceSession {
     std::function<void(const proto::Hello&)> onHello;
     std::function<void(proto::VideoFrame&&)> onFrame;
     std::function<void(const proto::Status&)> onStatus;
+    std::function<void(const proto::CameraState&)> onCameraState;
     // Fires exactly once when the phone side closes or misbehaves; never from the destructor.
     // Must not destroy the session from inside the callback.
     std::function<void(std::string reason)> onClosed;
@@ -40,6 +41,7 @@ class DeviceSession {
 
   void Start();
   void SendConfigure(const proto::Configure& configure);
+  void SendCameraSettings(const proto::CameraSettings& settings);
   void RequestKeyframe();
   std::optional<int64_t> PhoneToPcUs(uint64_t phoneUs) const;
   bool Closed() const { return closed_.load(); }

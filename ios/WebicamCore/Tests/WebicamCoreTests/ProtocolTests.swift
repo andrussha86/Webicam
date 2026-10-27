@@ -3,8 +3,8 @@ import XCTest
 
 /// Expected values of shared/testvectors/*.bin (mirrors windows/core/include/webicam/testvectors.h).
 private let vectors: [(String, Message)] = [
-    ("hello_pc.bin", .hello(version: 1, model: nil, formats: [])),
-    ("hello_phone.bin", .hello(version: 1, model: "iPhone16,1", formats: [
+    ("hello_pc.bin", .hello(version: 2, model: nil, formats: [])),
+    ("hello_phone.bin", .hello(version: 2, model: "iPhone16,1", formats: [
         CaptureFormat(width: 1280, height: 720, maxFps: 60),
         CaptureFormat(width: 1920, height: 1080, maxFps: 60),
         CaptureFormat(width: 3840, height: 2160, maxFps: 30),
@@ -16,6 +16,42 @@ private let vectors: [(String, Message)] = [
     ("ping.bin", .ping(pcTimeUs: 1000)),
     ("pong.bin", .pong(pcTimeUs: 1000, phoneTimeUs: 2000)),
     ("status_thermal.bin", .status(state: .thermalThrottled, thermal: 2, message: "serious")),
+    ("camera_settings.bin", .cameraSettings({
+        var c = CameraSettings()
+        c.lens = .telephoto
+        c.zoom = 1.5
+        c.manualExposure = true
+        c.iso = 400
+        c.shutterUs = 8000
+        c.exposureBias = -0.5
+        c.manualWhiteBalance = true
+        c.temperatureK = 4500
+        c.tint = 10
+        c.manualFocus = true
+        c.lensPosition = 0.25
+        c.blur = 60
+        c.rotate180 = true
+        return c
+    }())),
+    ("camera_state.bin", .cameraState({
+        var c = CameraState()
+        c.lenses = 0x1F
+        c.lens = .wide
+        c.isoMin = 50
+        c.isoMax = 3200
+        c.shutterMinUs = 20
+        c.shutterMaxUs = 16666
+        c.biasMin = -8
+        c.biasMax = 8
+        c.zoomMax = 10
+        c.manualFocusSupported = true
+        c.iso = 200
+        c.shutterUs = 10000
+        c.temperatureK = 5200
+        c.tint = -5
+        c.lensPosition = 0.75
+        return c
+    }())),
 ]
 
 private let vectorsDir: URL = {
@@ -57,7 +93,7 @@ final class ProtocolTests: XCTestCase {
 
     func testUnknownTypeThrows() {
         var parser = MessageParser()
-        parser.feed(Data([0x09, 0, 0, 0, 0]))
+        parser.feed(Data([0x0A, 0, 0, 0, 0]))
         XCTAssertThrowsError(try parser.next())
     }
 

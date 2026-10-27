@@ -68,7 +68,7 @@ TEST(Protocol, ParserOversizeLengthIsError) {
 
 TEST(Protocol, ParserUnknownTypeIsError) {
   MessageParser parser;
-  parser.Feed(Header(0x09, 0));
+  parser.Feed(Header(0x0A, 0));
   Message m;
   EXPECT_EQ(parser.Next(m), MessageParser::Result::Error);
 }

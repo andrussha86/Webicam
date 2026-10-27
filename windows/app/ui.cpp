@@ -3,7 +3,10 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
+
+#include "webicam/vcam_logic.h"
 
 namespace webicam::app {
 
@@ -28,6 +31,114 @@ std::vector<Choice> CaptureChoices(const std::vector<proto::CaptureFormat>& form
   return choices;
 }
 
+constexpr uint64_t kCameraSendIntervalMs = 50;  // at most 20 CameraSettings per second
+
+// Ranges to use before the phone has reported its own.
+proto::CameraState FallbackCameraState() {
+  proto::CameraState s;
+  s.lenses = 0x1F;
+  s.isoMin = 25;
+  s.isoMax = 3200;
+  s.shutterMinUs = 50;
+  s.shutterMaxUs = 33333;
+  s.biasMin = -8;
+  s.biasMax = 8;
+  s.zoomMax = 5;
+  s.manualFocusSupported = true;
+  s.iso = 100;
+  s.shutterUs = 10000;
+  s.temperatureK = 5000;
+  s.lensPosition = 0.5f;
+  return s;
+}
+
+// "Авто" checkbox in front of a group: returns true while the group is manual.
+bool ManualToggle(const char* id, bool& manual) {
+  bool automatic = !manual;
+  if (ImGui::Checkbox(id, &automatic)) manual = !automatic;
+  return manual;
+}
+
+void DrawCameraControls(UiState& state, ConnectionManager& connection) {
+  const auto phone = connection.PhoneCamera();
+  const proto::CameraState range = phone.value_or(FallbackCameraState());
+  auto& c = state.camera;
+
+  ImGui::SeparatorText("Объектив");
+  static const char* kLensNames[proto::kLensCount] = {"0.5×", "1×", "2×", "3×", "Фронт."};
+  for (int i = 0; i < proto::kLensCount; ++i) {
+    if (i > 0) ImGui::SameLine();
+    const bool available = (range.lenses >> i) & 1;
+    ImGui::BeginDisabled(!available);
+    if (ImGui::RadioButton(kLensNames[i], c.lens == proto::Lens(i))) {
+      c.lens = proto::Lens(i);
+      c.zoom = 1.0f;
+    }
+    ImGui::EndDisabled();
+  }
+  if (phone && phone->lens != c.lens) ImGui::TextDisabled("Переключение объектива…");
+  ImGui::SliderFloat("Зум", &c.zoom, 1.0f, std::max(range.zoomMax, 1.01f), "%.2f×", ImGuiSliderFlags_Logarithmic);
+  ImGui::Checkbox("Повернуть на 180°", &c.rotate180);
+
+  ImGui::SeparatorText("Экспозиция");
+  const bool manualExposure = ManualToggle("Авто##exposure", c.manualExposure);
+  if (manualExposure) {
+    c.iso = std::clamp(c.iso, range.isoMin, std::max(range.isoMax, range.isoMin));
+    ImGui::SliderFloat("ISO", &c.iso, range.isoMin, range.isoMax, "%.0f", ImGuiSliderFlags_Logarithmic);
+    // The slider works on the denominator of 1/N s, which is how shutter speed is read.
+    const float slowest = 1e6f / float(std::max(range.shutterMaxUs, 1u));
+    const float fastest = 1e6f / float(std::max(range.shutterMinUs, 1u));
+    float denominator = std::clamp(1e6f / float(std::max(c.shutterUs, 1u)), slowest, fastest);
+    if (ImGui::SliderFloat("Выдержка", &denominator, slowest, fastest, "1/%.0f с", ImGuiSliderFlags_Logarithmic)) {
+      c.shutterUs = uint32_t(std::lround(1e6f / denominator));
+    }
+  } else {
+    ImGui::SliderFloat("Экспокоррекция", &c.exposureBias, std::max(range.biasMin, -4.0f),
+                       std::min(range.biasMax, 4.0f), "%+.1f EV");
+    if (phone) {
+      ImGui::TextDisabled("Сейчас: ISO %.0f, 1/%.0f с", phone->iso,
+                          1e6f / float(std::max(phone->shutterUs, 1u)));
+    }
+  }
+
+  ImGui::SeparatorText("Баланс белого");
+  if (ManualToggle("Авто##wb", c.manualWhiteBalance)) {
+    ImGui::SliderFloat("Температура", &c.temperatureK, 2500.0f, 10000.0f, "%.0f K");
+    ImGui::SliderFloat("Оттенок", &c.tint, -150.0f, 150.0f, "%+.0f");
+  } else if (phone) {
+    ImGui::TextDisabled("Сейчас: %.0f K, оттенок %+.0f", phone->temperatureK, phone->tint);
+  }
+
+  ImGui::SeparatorText("Фокус");
+  ImGui::BeginDisabled(!range.manualFocusSupported);
+  if (ManualToggle("Авто##focus", c.manualFocus)) {
+    ImGui::SliderFloat("Дистанция", &c.lensPosition, 0.0f, 1.0f, "%.2f");
+    ImGui::TextDisabled("0 — близко, 1 — далеко");
+  } else if (phone) {
+    ImGui::TextDisabled("Сейчас: %.2f", phone->lensPosition);
+  }
+  ImGui::EndDisabled();
+  if (!range.manualFocusSupported) ImGui::TextDisabled("У этого объектива нет ручного фокуса");
+
+  ImGui::SeparatorText("Фон");
+  int blur = c.blur;
+  if (ImGui::SliderInt("Размытие", &blur, 0, 100, blur == 0 ? "выкл." : "%d%%")) c.blur = uint8_t(blur);
+
+  ImGui::Spacing();
+  if (ImGui::Button("Всё в авто")) {
+    proto::CameraSettings reset;
+    reset.lens = c.lens;
+    reset.rotate180 = c.rotate180;
+    c = reset;
+  }
+
+  const uint64_t now = SteadyNowMs();
+  if (c != connection.DesiredCamera() && now - state.lastCameraSendMs >= kCameraSendIntervalMs) {
+    state.lastCameraSendMs = now;
+    connection.SetDesiredCamera(c);
+  }
+}
+
 }  // namespace
 
 void DrawUi(UiState& state, ConnectionManager& connection, Pipeline& pipeline) {
@@ -37,7 +148,7 @@ void DrawUi(UiState& state, ConnectionManager& connection, Pipeline& pipeline) {
   ImGui::Begin("Webicam", nullptr,
                ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus);
 
-  ImGui::BeginChild("controls", ImVec2(340, 0), ImGuiChildFlags_Borders);
+  ImGui::BeginChild("controls", ImVec2(380, 0), ImGuiChildFlags_Borders);
   ImGui::TextWrapped("%s", connection.Detail().c_str());
   if (!state.phoneStatus.empty()) {
     ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "%s", state.phoneStatus.c_str());
@@ -81,8 +192,11 @@ void DrawUi(UiState& state, ConnectionManager& connection, Pipeline& pipeline) {
     auto configure = choices[size_t(state.formatIndex)].configure;
     configure.bitrateKbps = uint32_t(state.bitrateMbps * 1000.0f);
     connection.SetDesiredConfigure(configure);
+    state.chosenConfigure = configure;
   }
   ImGui::EndDisabled();
+
+  DrawCameraControls(state, connection);
 
   ImGui::SeparatorText("Статистика");
   const auto stats = pipeline.Stats();

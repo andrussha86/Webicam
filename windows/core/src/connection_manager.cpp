@@ -79,7 +79,27 @@ void ConnectionManager::SetDesiredConfigure(const proto::Configure& configure) {
   std::lock_guard lock(mutex_);
   desired_ = configure;
   desiredExplicit_ = true;
-  if (session_ && streaming_) session_->SendConfigure(configure);
+  if (session_ && streaming_) {
+    session_->SendConfigure(configure);
+    session_->SendCameraSettings(camera_);
+  }
+}
+
+void ConnectionManager::SetDesiredCamera(const proto::CameraSettings& settings) {
+  std::lock_guard lock(mutex_);
+  if (settings == camera_) return;
+  camera_ = settings;
+  if (session_ && streaming_) session_->SendCameraSettings(settings);
+}
+
+proto::CameraSettings ConnectionManager::DesiredCamera() const {
+  std::lock_guard lock(mutex_);
+  return camera_;
+}
+
+std::optional<proto::CameraState> ConnectionManager::PhoneCamera() const {
+  std::lock_guard lock(mutex_);
+  return phoneCamera_;
 }
 
 proto::Configure ConnectionManager::DesiredConfigure() const {
@@ -122,13 +142,20 @@ void ConnectionManager::Attach(Socket socket) {
     }
     if (callbacks_.onConnectionChanged) callbacks_.onConnectionChanged(true);
     std::lock_guard lock(mutex_);
-    if (session_) session_->SendConfigure(*configure);
+    if (session_) {
+      session_->SendConfigure(*configure);
+      session_->SendCameraSettings(camera_);
+    }
   };
   events.onFrame = [this](proto::VideoFrame&& frame) {
     if (callbacks_.onFrame) callbacks_.onFrame(std::move(frame));
   };
   events.onStatus = [this](const proto::Status& status) {
     if (callbacks_.onStatus) callbacks_.onStatus(status);
+  };
+  events.onCameraState = [this](const proto::CameraState& state) {
+    std::lock_guard lock(mutex_);
+    phoneCamera_ = state;
   };
   events.onClosed = [this](std::string reason) {
     std::lock_guard lock(mutex_);
@@ -139,6 +166,7 @@ void ConnectionManager::Attach(Socket socket) {
   {
     std::lock_guard lock(mutex_);
     session_ = std::move(session);
+    phoneCamera_.reset();
     closeReason_.clear();
   }
   raw->Start();

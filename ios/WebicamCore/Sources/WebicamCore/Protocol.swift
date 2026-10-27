@@ -1,8 +1,8 @@
 import Foundation
 
-/// Webicam wire protocol v1 — see shared/protocol.md.
+/// Webicam wire protocol v2 — see shared/protocol.md.
 public enum ProtocolConstants {
-    public static let version: UInt16 = 1
+    public static let version: UInt16 = 2
     public static let phonePort: UInt16 = 47800
     public static let maxPayloadBytes = 16 * 1024 * 1024
 }
@@ -26,8 +26,52 @@ public enum StreamState: UInt8 {
     case error = 3
 }
 
+public enum Lens: UInt8, CaseIterable {
+    case ultraWide = 0, wide, wide2x, telephoto, front
+}
+
+/// Full snapshot of the PC's camera choices; the phone clamps every value to the active lens.
+public struct CameraSettings: Equatable {
+    public var lens: Lens = .wide
+    public var zoom: Float = 1  // >= 1, multiplier within the lens
+    public var manualExposure = false
+    public var iso: Float = 100
+    public var shutterUs: UInt32 = 10000
+    public var exposureBias: Float = 0  // EV, used in auto exposure
+    public var manualWhiteBalance = false
+    public var temperatureK: Float = 5000
+    public var tint: Float = 0
+    public var manualFocus = false
+    public var lensPosition: Float = 0.5  // 0 near ... 1 far
+    public var blur: UInt8 = 0  // 0 off ... 100 strongest
+    public var rotate180 = false
+
+    public init() {}
+}
+
+/// Ranges of the active lens and its current (auto or manual) values.
+public struct CameraState: Equatable {
+    public var lenses: UInt8 = 0  // bit i set = Lens(rawValue: i) is available
+    public var lens: Lens = .wide
+    public var isoMin: Float = 0
+    public var isoMax: Float = 0
+    public var shutterMinUs: UInt32 = 0
+    public var shutterMaxUs: UInt32 = 0
+    public var biasMin: Float = 0
+    public var biasMax: Float = 0
+    public var zoomMax: Float = 1
+    public var manualFocusSupported = false
+    public var iso: Float = 0
+    public var shutterUs: UInt32 = 0
+    public var temperatureK: Float = 0
+    public var tint: Float = 0
+    public var lensPosition: Float = 0
+
+    public init() {}
+}
+
 enum MessageType: UInt8 {
-    case hello = 1, configure, videoFrame, requestKeyframe, ping, pong, status
+    case hello = 1, configure, videoFrame, requestKeyframe, ping, pong, status, cameraSettings, cameraState
 }
 
 public enum Message: Equatable {
@@ -39,6 +83,8 @@ public enum Message: Equatable {
     case ping(pcTimeUs: UInt64)
     case pong(pcTimeUs: UInt64, phoneTimeUs: UInt64)
     case status(state: StreamState, thermal: UInt8, message: String)
+    case cameraSettings(CameraSettings)
+    case cameraState(CameraState)
 
     public func encoded() -> Data {
         var payload = ByteWriter()
@@ -81,6 +127,38 @@ public enum Message: Equatable {
             payload.u8(state.rawValue)
             payload.u8(thermal)
             payload.str(message)
+        case let .cameraSettings(c):
+            type = .cameraSettings
+            payload.u8(c.lens.rawValue)
+            payload.f32(c.zoom)
+            payload.bool(c.manualExposure)
+            payload.f32(c.iso)
+            payload.u32(c.shutterUs)
+            payload.f32(c.exposureBias)
+            payload.bool(c.manualWhiteBalance)
+            payload.f32(c.temperatureK)
+            payload.f32(c.tint)
+            payload.bool(c.manualFocus)
+            payload.f32(c.lensPosition)
+            payload.u8(c.blur)
+            payload.bool(c.rotate180)
+        case let .cameraState(c):
+            type = .cameraState
+            payload.u8(c.lenses)
+            payload.u8(c.lens.rawValue)
+            payload.f32(c.isoMin)
+            payload.f32(c.isoMax)
+            payload.u32(c.shutterMinUs)
+            payload.u32(c.shutterMaxUs)
+            payload.f32(c.biasMin)
+            payload.f32(c.biasMax)
+            payload.f32(c.zoomMax)
+            payload.bool(c.manualFocusSupported)
+            payload.f32(c.iso)
+            payload.u32(c.shutterUs)
+            payload.f32(c.temperatureK)
+            payload.f32(c.tint)
+            payload.f32(c.lensPosition)
         }
         var frame = ByteWriter()
         frame.u8(type.rawValue)
@@ -97,6 +175,8 @@ struct ByteWriter {
     mutating func u16(_ v: UInt16) { le(UInt64(v), 2) }
     mutating func u32(_ v: UInt32) { le(UInt64(v), 4) }
     mutating func u64(_ v: UInt64) { le(v, 8) }
+    mutating func f32(_ v: Float) { u32(v.bitPattern) }
+    mutating func bool(_ v: Bool) { u8(v ? 1 : 0) }
     mutating func str(_ s: String) {
         let utf8 = Array(s.utf8)
         u16(UInt16(utf8.count))

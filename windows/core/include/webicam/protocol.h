@@ -9,11 +9,13 @@
 
 namespace webicam::proto {
 
-inline constexpr uint16_t kProtocolVersion = 1;
+inline constexpr uint16_t kProtocolVersion = 2;
 inline constexpr uint16_t kPhonePort = 47800;
 inline constexpr uint32_t kMaxPayloadBytes = 16u * 1024 * 1024;
 
-enum class MsgType : uint8_t { Hello = 1, Configure, VideoFrame, RequestKeyframe, Ping, Pong, Status };
+enum class MsgType : uint8_t {
+  Hello = 1, Configure, VideoFrame, RequestKeyframe, Ping, Pong, Status, CameraSettings, CameraState
+};
 
 struct CaptureFormat {
   uint16_t width;
@@ -70,7 +72,46 @@ struct Status {
   bool operator==(const Status&) const = default;
 };
 
-using Message = std::variant<Hello, Configure, VideoFrame, RequestKeyframe, Ping, Pong, Status>;
+enum class Lens : uint8_t { UltraWide = 0, Wide = 1, Wide2x = 2, Telephoto = 3, Front = 4 };
+inline constexpr int kLensCount = 5;
+
+// Full snapshot of the PC's camera choices; the phone clamps every value to the active lens.
+struct CameraSettings {
+  Lens lens = Lens::Wide;
+  float zoom = 1.0f;  // ≥ 1, multiplier within the lens
+  bool manualExposure = false;
+  float iso = 100.0f;
+  uint32_t shutterUs = 10000;
+  float exposureBias = 0.0f;  // EV, used in auto exposure
+  bool manualWhiteBalance = false;
+  float temperatureK = 5000.0f;
+  float tint = 0.0f;
+  bool manualFocus = false;
+  float lensPosition = 0.5f;  // 0 near … 1 far
+  uint8_t blur = 0;           // 0 off … 100 strongest
+  bool rotate180 = false;
+  bool operator==(const CameraSettings&) const = default;
+};
+
+// Ranges of the active lens and its current (auto or manual) values.
+struct CameraState {
+  uint8_t lenses = 0;  // bit i set = Lens(i) is available
+  Lens lens = Lens::Wide;
+  float isoMin = 0, isoMax = 0;
+  uint32_t shutterMinUs = 0, shutterMaxUs = 0;
+  float biasMin = 0, biasMax = 0;
+  float zoomMax = 1;
+  bool manualFocusSupported = false;
+  float iso = 0;
+  uint32_t shutterUs = 0;
+  float temperatureK = 0;
+  float tint = 0;
+  float lensPosition = 0;
+  bool operator==(const CameraState&) const = default;
+};
+
+using Message =
+    std::variant<Hello, Configure, VideoFrame, RequestKeyframe, Ping, Pong, Status, CameraSettings, CameraState>;
 
 std::vector<uint8_t> Encode(const Message& message);
 

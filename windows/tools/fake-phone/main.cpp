@@ -83,6 +83,13 @@ void Serve(Socket client, const Options& options) {
         keyframe = true;
       } else if (auto* p = std::get_if<proto::Ping>(&m)) {
         send(proto::Pong{p->pcTimeUs, NowUs()});
+      } else if (auto* s = std::get_if<proto::CameraSettings>(&m)) {
+        // Echo the settings back as the lens state, with plausible iPhone ranges.
+        std::printf("camera: lens %u zoom %.2f blur %u\n", unsigned(s->lens), s->zoom, unsigned(s->blur));
+        send(proto::CameraState{0x1F, s->lens, 50, 6400, 30, 33333, -8, 8, 6, s->lens != proto::Lens::Front,
+                                s->manualExposure ? s->iso : 200, s->manualExposure ? s->shutterUs : 10000,
+                                s->manualWhiteBalance ? s->temperatureK : 5200, s->manualWhiteBalance ? s->tint : 0,
+                                s->manualFocus ? s->lensPosition : 0.6f});
       }
     }
   }

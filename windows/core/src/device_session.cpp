@@ -34,6 +34,8 @@ void DeviceSession::Start() {
 
 void DeviceSession::SendConfigure(const proto::Configure& configure) { Send(configure); }
 
+void DeviceSession::SendCameraSettings(const proto::CameraSettings& settings) { Send(settings); }
+
 void DeviceSession::RequestKeyframe() { Send(proto::RequestKeyframe{}); }
 
 std::optional<int64_t> DeviceSession::PhoneToPcUs(uint64_t phoneUs) const {
@@ -93,7 +95,9 @@ void DeviceSession::Run() {
         }
         if (hello->version != proto::kProtocolVersion) {
           Close("версия протокола не совпадает (телефон: " + std::to_string(hello->version) +
-                ", ПК: " + std::to_string(proto::kProtocolVersion) + ")");
+                ", ПК: " + std::to_string(proto::kProtocolVersion) + "), " +
+                (hello->version < proto::kProtocolVersion ? "обновите приложение на iPhone"
+                                                          : "обновите webicam.exe"));
           return;
         }
         handshaken = true;
@@ -107,6 +111,8 @@ void DeviceSession::Run() {
         clock_.AddSample(pong->pcTimeUs, pong->phoneTimeUs, NowUs());
       } else if (auto* status = std::get_if<proto::Status>(&message)) {
         if (events_.onStatus) events_.onStatus(*status);
+      } else if (auto* camera = std::get_if<proto::CameraState>(&message)) {
+        if (events_.onCameraState) events_.onCameraState(*camera);
       }
     }
     if (result == proto::MessageParser::Result::Error) {

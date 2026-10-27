@@ -85,7 +85,7 @@ TEST(DeviceSession, VersionMismatchCloses) {
                           reason = std::move(r);
                         }});
   session.Start();
-  h.SendFromPhone(proto::Hello{2, "iPhone", {}});
+  h.SendFromPhone(proto::Hello{proto::kProtocolVersion + 1, "iPhone", {}});
   ASSERT_TRUE(WaitFor([&] { return session.Closed(); }));
   std::lock_guard lock(mutex);
   EXPECT_NE(reason.find("версия"), std::string::npos) << reason;

@@ -22,6 +22,7 @@ final class ControlHandler {
     private var active: (width: Int, height: Int, fps: Int, bitrateKbps: Int)?
     private var throttled = false
     private var stopped = false  // logic copy of model.stopped, safe off the main thread
+    private let stateTimer = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "webicam.camera-state"))
 
     init() {
         capture.onFrame = { [encoder] pixelBuffer, time in encoder.encode(pixelBuffer, time: time) }
@@ -35,6 +36,10 @@ final class ControlHandler {
         NotificationCenter.default.addObserver(
             forName: ProcessInfo.thermalStateDidChangeNotification, object: nil, queue: nil
         ) { [weak self] _ in self?.thermalChanged() }
+        // Current ISO/shutter/white balance for the PC's sliders while they are on auto.
+        stateTimer.schedule(deadline: .now() + 0.5, repeating: 0.5)
+        stateTimer.setEventHandler { [weak self] in self?.sendCameraState() }
+        stateTimer.resume()
     }
 
     func start() {
@@ -73,6 +78,14 @@ final class ControlHandler {
         switch message {
         case let .configure(width, height, fps, bitrateKbps):
             apply(width: Int(width), height: Int(height), fps: Int(fps), bitrateKbps: Int(bitrateKbps))
+        case let .cameraSettings(settings):
+            do {
+                try capture.apply(settings)
+            } catch {
+                server.send(.status(state: .error, thermal: thermalLevel(),
+                                    message: "Объектив недоступен в этом формате: \(error)"))
+            }
+            sendCameraState()
         case .requestKeyframe:
             encoder.forceKeyframe()
         case let .ping(pcTimeUs):
@@ -91,7 +104,7 @@ final class ControlHandler {
             effectiveBitrate = bitrateKbps * 7 / 10
         }
         do {
-            try capture.configure(width: width, height: height, fps: effectiveFps)
+            effectiveFps = try capture.configure(width: width, height: height, fps: effectiveFps)
             try encoder.configure(width: width, height: height, fps: effectiveFps, bitrateKbps: effectiveBitrate)
         } catch {
             server.send(.status(state: .error, thermal: thermalLevel(), message: "Формат не поддерживается: \(error)"))
@@ -102,6 +115,14 @@ final class ControlHandler {
             $0.bitrate = "\(effectiveBitrate / 1000) Мбит/с"
         }
         if !stopped { capture.start() }
+        // The PC may have missed earlier status changes; always tell it where we are.
+        let state: StreamState = stopped ? .stoppedByUser : (throttled ? .thermalThrottled : .streaming)
+        server.send(.status(state: state, thermal: thermalLevel(), message: ""))
+        sendCameraState()
+    }
+
+    private func sendCameraState() {
+        if let state = capture.state() { server.send(.cameraState(state)) }
     }
 
     private func thermalChanged() {

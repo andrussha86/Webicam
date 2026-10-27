@@ -89,6 +89,52 @@ public struct MessageParser {
                   let message = r.str(), r.remaining == 0
             else { return nil }
             return .status(state: state, thermal: thermal, message: message)
+        case .cameraSettings:
+            var c = CameraSettings()
+            guard let rawLens = r.u8(), let lens = Lens(rawValue: rawLens), let zoom = r.f32(),
+                  let manualExposure = r.bool(), let iso = r.f32(), let shutter = r.u32(), let bias = r.f32(),
+                  let manualWb = r.bool(), let temperature = r.f32(), let tint = r.f32(),
+                  let manualFocus = r.bool(), let lensPosition = r.f32(), let blur = r.u8(),
+                  let rotate = r.bool(), r.remaining == 0
+            else { return nil }
+            c.lens = lens
+            c.zoom = zoom
+            c.manualExposure = manualExposure
+            c.iso = iso
+            c.shutterUs = shutter
+            c.exposureBias = bias
+            c.manualWhiteBalance = manualWb
+            c.temperatureK = temperature
+            c.tint = tint
+            c.manualFocus = manualFocus
+            c.lensPosition = lensPosition
+            c.blur = blur
+            c.rotate180 = rotate
+            return .cameraSettings(c)
+        case .cameraState:
+            var c = CameraState()
+            guard let lenses = r.u8(), let rawLens = r.u8(), let lens = Lens(rawValue: rawLens),
+                  let isoMin = r.f32(), let isoMax = r.f32(), let shutterMin = r.u32(), let shutterMax = r.u32(),
+                  let biasMin = r.f32(), let biasMax = r.f32(), let zoomMax = r.f32(), let focus = r.bool(),
+                  let iso = r.f32(), let shutter = r.u32(), let temperature = r.f32(), let tint = r.f32(),
+                  let lensPosition = r.f32(), r.remaining == 0
+            else { return nil }
+            c.lenses = lenses
+            c.lens = lens
+            c.isoMin = isoMin
+            c.isoMax = isoMax
+            c.shutterMinUs = shutterMin
+            c.shutterMaxUs = shutterMax
+            c.biasMin = biasMin
+            c.biasMax = biasMax
+            c.zoomMax = zoomMax
+            c.manualFocusSupported = focus
+            c.iso = iso
+            c.shutterUs = shutter
+            c.temperatureK = temperature
+            c.tint = tint
+            c.lensPosition = lensPosition
+            return .cameraState(c)
         }
     }
 }
@@ -108,6 +154,11 @@ struct ByteReader {
     mutating func u16() -> UInt16? { le(2).map { UInt16($0) } }
     mutating func u32() -> UInt32? { le(4).map { UInt32($0) } }
     mutating func u64() -> UInt64? { le(8) }
+    mutating func f32() -> Float? { u32().map { Float(bitPattern: $0) } }
+    mutating func bool() -> Bool? {
+        guard let v = u8(), v <= 1 else { return nil }
+        return v == 1
+    }
 
     mutating func str() -> String? {
         guard let length = u16(), remaining >= Int(length) else { return nil }

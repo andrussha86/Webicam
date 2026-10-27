@@ -47,6 +47,11 @@ class ConnectionManager {
   // Remembered and re-sent after every reconnect.
   void SetDesiredConfigure(const proto::Configure& configure);
   proto::Configure DesiredConfigure() const;
+  // Remembered and re-sent after every Configure.
+  void SetDesiredCamera(const proto::CameraSettings& settings);
+  proto::CameraSettings DesiredCamera() const;
+  // Last CameraState from the phone; nullopt until one arrives on the current connection.
+  std::optional<proto::CameraState> PhoneCamera() const;
   void RequestKeyframe();
   std::optional<int64_t> PhoneToPcUs(uint64_t phoneUs) const;
 
@@ -69,6 +74,8 @@ class ConnectionManager {
   std::string model_;
   proto::Configure desired_{1920, 1080, 30, 16000};
   bool desiredExplicit_ = false;
+  proto::CameraSettings camera_;
+  std::optional<proto::CameraState> phoneCamera_;
   std::unique_ptr<DeviceSession> session_;
   bool streaming_ = false;
   std::string closeReason_;
