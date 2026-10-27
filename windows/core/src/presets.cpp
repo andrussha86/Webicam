@@ -131,7 +131,10 @@ std::optional<proto::Configure> MatchFormat(const proto::Configure& wanted,
                                             const std::vector<proto::CaptureFormat>& phone) {
   std::optional<proto::Configure> best;
   for (const auto& f : phone) {
-    if (f.width != wanted.width || f.height != wanted.height) continue;
+    // A portrait stream is a landscape phone format turned on the phone.
+    const bool same = f.width == wanted.width && f.height == wanted.height;
+    const bool turned = f.width == wanted.height && f.height == wanted.width;
+    if (!same && !turned) continue;
     const uint8_t fps = std::min(wanted.fps, f.maxFps);
     if (!best || fps > best->fps) best = proto::Configure{wanted.width, wanted.height, fps, wanted.bitrateKbps};
   }

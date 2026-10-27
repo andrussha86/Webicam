@@ -22,6 +22,19 @@ RECT CenterCrop(uint32_t inW, uint32_t inH, uint32_t outW, uint32_t outH) {
   return {x, y, x + LONG(cropW), y + LONG(cropH)};
 }
 
+// Largest centered rect of the destination with the source's aspect ratio (even coordinates).
+RECT CenterFit(uint32_t inW, uint32_t inH, uint32_t outW, uint32_t outH) {
+  uint32_t fitW = outW, fitH = outH;
+  if (uint64_t(inW) * outH > uint64_t(inH) * outW) {
+    fitH = std::max(2u, uint32_t(uint64_t(outW) * inH / inW) & ~1u);
+  } else {
+    fitW = std::max(2u, uint32_t(uint64_t(outH) * inW / inH) & ~1u);
+  }
+  const LONG x = LONG((outW - fitW) / 2) & ~1;
+  const LONG y = LONG((outH - fitH) / 2) & ~1;
+  return {x, y, x + LONG(fitW), y + LONG(fitH)};
+}
+
 }  // namespace
 
 std::unique_ptr<FrameScaler> FrameScaler::Create(const D3DContext& d3d) {
@@ -126,8 +139,14 @@ bool FrameScaler::ToNv12Cpu(const DecodedFrame& in, uint32_t outW, uint32_t outH
   if (!in.texture || in.width == 0 || in.height == 0 || outW == 0 || outH == 0) return false;
   if (!EnsureProcessor(in.width, in.height, outW, outH)) return false;
   if (!EnsureTarget(nv12_, outW, outH, DXGI_FORMAT_NV12)) return false;
-  const RECT dest{0, 0, LONG(outW), LONG(outH)};
-  if (!Blit(in, nv12_, CenterCrop(in.width, in.height, outW, outH), dest)) return false;
+  // Same orientation: crop the small difference (16:9 into 4:3). Portrait into landscape or back:
+  // crop would cut most of the picture, so it is fitted with black bars instead.
+  const bool sameOrientation = (in.width >= in.height) == (outW >= outH);
+  const RECT full{0, 0, LONG(outW), LONG(outH)};
+  const RECT source = sameOrientation ? CenterCrop(in.width, in.height, outW, outH)
+                                      : RECT{0, 0, LONG(in.width), LONG(in.height)};
+  const RECT dest = sameOrientation ? full : CenterFit(in.width, in.height, outW, outH);
+  if (!Blit(in, nv12_, source, dest)) return false;
 
   d3d_.context->CopyResource(nv12_.staging.Get(), nv12_.texture.Get());
   D3D11_MAPPED_SUBRESOURCE mapped{};

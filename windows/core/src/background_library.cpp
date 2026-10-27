@@ -1,6 +1,7 @@
 #include "webicam/background_library.h"
 
 #include <algorithm>
+#include <cmath>
 #include <charconv>
 #include <cstdio>
 #include <fstream>
@@ -16,6 +17,8 @@ namespace fs = std::filesystem;
 namespace {
 
 constexpr std::string_view kBuiltinPrefix = "builtin:";
+// Covers a 4K stream either way round.
+constexpr uint32_t kMaxStoredSide = 3840;
 
 std::optional<int> BuiltinIndex(std::string_view ref) {
   if (!ref.starts_with(kBuiltinPrefix)) return std::nullopt;
@@ -31,15 +34,6 @@ std::optional<int> BuiltinIndex(std::string_view ref) {
 // Library names are plain file names; anything with a path part is not ours.
 bool IsPlainName(std::string_view name) {
   return !name.empty() && name.find_first_of("/\\:") == std::string_view::npos && name != "." && name != "..";
-}
-
-std::string LowerAsciiExtension(const fs::path& path) {
-  std::string ext;
-  for (wchar_t c : path.extension().wstring()) {
-    if (c > 0x7F) return ".img";
-    ext += char(c >= L'A' && c <= L'Z' ? c - L'A' + L'a' : c);
-  }
-  return ext.empty() ? ".img" : ext;
 }
 
 }  // namespace
@@ -61,7 +55,6 @@ std::vector<std::string> BackgroundLibrary::List() const {
 
 std::expected<std::string, std::string> BackgroundLibrary::Add(const fs::path& source) {
   const std::string failure = "Не удалось открыть картинку: " + source.filename().string();
-  if (!LoadImageFile(source)) return std::unexpected(failure);
   std::ifstream file(source, std::ios::binary);
   const std::vector<char> bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
   if (bytes.empty()) return std::unexpected(failure);
@@ -69,12 +62,34 @@ std::expected<std::string, std::string> BackgroundLibrary::Add(const fs::path& s
   for (char b : bytes) hash = (hash ^ uint8_t(b)) * 1099511628211ull;
   char hex[17];
   std::snprintf(hex, sizeof(hex), "%016llx", static_cast<unsigned long long>(hash));
-  const std::string name = hex + LowerAsciiExtension(source);
+  const std::string name = std::string(hex) + ".jpg";
   const fs::path target = dir_ / name;
   std::error_code ec;
   if (fs::exists(target, ec)) return name;
+
+  // Stored once as a JPEG no larger than kMaxStoredSide, so every later decode (thumbnail, each
+  // stream size) is quick even for a 48 MP photo or a HEIC.
+  const auto image = DecodeImage(std::span(reinterpret_cast<const uint8_t*>(bytes.data()), bytes.size()));
+  if (!image) return std::unexpected(failure);
+  const double scale = std::min(1.0, double(kMaxStoredSide) / std::max(image->width, image->height));
+  const uint32_t w = std::max(1u, uint32_t(std::lround(image->width * scale)));
+  const uint32_t h = std::max(1u, uint32_t(std::lround(image->height * scale)));
+  const auto jpeg = EncodeJpeg(scale < 1.0 ? CoverResize(*image, w, h) : *image, 0.92f);
+  if (jpeg.empty()) return std::unexpected(failure);
+
   fs::create_directories(dir_, ec);
-  if (!fs::copy_file(source, target, ec)) return std::unexpected("Не удалось сохранить картинку");
+  const fs::path temp = dir_ / (name + ".tmp");
+  {
+    std::ofstream out(temp, std::ios::binary | std::ios::trunc);
+    if (!out.write(reinterpret_cast<const char*>(jpeg.data()), std::streamsize(jpeg.size()))) {
+      return std::unexpected("Не удалось сохранить картинку");
+    }
+  }
+  fs::rename(temp, target, ec);
+  if (ec) {
+    fs::remove(temp, ec);
+    return std::unexpected("Не удалось сохранить картинку");
+  }
   return name;
 }
 

@@ -1,5 +1,6 @@
 #include "webicam/protocol.h"
 
+#include <algorithm>
 #include <bit>
 #include <optional>
 
@@ -144,19 +145,24 @@ std::optional<Message> DecodePayload(MsgType type, std::span<const uint8_t> payl
       auto manualFocus = r.Bool();
       auto lensPosition = r.F32();
       auto blur = r.U8();
-      auto rotate = r.Bool();
+      auto rotation = r.U8();
       auto face = r.Bool();
       auto mode = r.U8();
       auto color = r.U32();
+      auto mirrorH = r.Bool();
+      auto mirrorV = r.Bool();
+      auto panX = r.F32();
+      auto panY = r.F32();
       if (!lens || !zoom || !manualExposure || !iso || !shutter || !bias || !manualWb || !temperature || !tint ||
-          !manualFocus || !lensPosition || !blur || !rotate || !face || !mode || !color || r.Remaining() != 0 ||
-          *lens >= kLensCount || *mode >= kBackgroundModeCount || *color > 0xFFFFFF) {
+          !manualFocus || !lensPosition || !blur || !rotation || !face || !mode || !color || !mirrorH || !mirrorV ||
+          !panX || !panY || r.Remaining() != 0 || *lens >= kLensCount || *rotation >= kRotationCount ||
+          *mode >= kBackgroundModeCount || *color > 0xFFFFFF) {
         return std::nullopt;
       }
-      return CameraSettings{Lens(*lens), *zoom,  *manualExposure, *iso,  *shutter,
-                            *bias,       *manualWb, *temperature, *tint, *manualFocus,
-                            *lensPosition, *blur, *rotate,        *face, BackgroundMode(*mode),
-                            *color};
+      return CameraSettings{Lens(*lens),   *zoom,    *manualExposure, *iso,  *shutter,
+                            *bias,         *manualWb, *temperature,   *tint, *manualFocus,
+                            *lensPosition, *blur,    Rotation(*rotation), *face, BackgroundMode(*mode),
+                            *color,        *mirrorH, *mirrorV,        *panX, *panY};
     }
     case MsgType::CameraState: {
       auto lenses = r.U8();
@@ -177,14 +183,16 @@ std::optional<Message> DecodePayload(MsgType type, std::span<const uint8_t> payl
       auto reactionsSupported = r.Bool();
       auto reactionsEnabled = r.Bool();
       auto gestures = r.Bool();
+      auto flipped = r.Bool();
       if (!lenses || !lens || !isoMin || !isoMax || !shutterMin || !shutterMax || !biasMin || !biasMax || !zoomMax ||
           !focus || !iso || !shutter || !temperature || !tint || !lensPosition || !reactionsSupported ||
-          !reactionsEnabled || !gestures || r.Remaining() != 0 || *lens >= kLensCount) {
+          !reactionsEnabled || !gestures || !flipped || r.Remaining() != 0 || *lens >= kLensCount) {
         return std::nullopt;
       }
       return CameraState{*lenses, Lens(*lens), *isoMin,  *isoMax,       *shutterMin, *shutterMax,
                          *biasMin, *biasMax,   *zoomMax, *focus,        *iso,        *shutter,
-                         *temperature, *tint,  *lensPosition, *reactionsSupported, *reactionsEnabled, *gestures};
+                         *temperature, *tint,  *lensPosition, *reactionsSupported, *reactionsEnabled, *gestures,
+                         *flipped};
     }
     case MsgType::BackgroundImage:
       return BackgroundImage{r.Rest()};
@@ -251,10 +259,14 @@ std::vector<uint8_t> Encode(const Message& message) {
           payload.Bool(m.manualFocus);
           payload.F32(m.lensPosition);
           payload.U8(m.blur);
-          payload.Bool(m.rotate180);
+          payload.U8(uint8_t(m.rotation));
           payload.Bool(m.faceFocus);
           payload.U8(uint8_t(m.backgroundMode));
           payload.U32(m.backgroundColor);
+          payload.Bool(m.mirrorHorizontal);
+          payload.Bool(m.mirrorVertical);
+          payload.F32(m.panX);
+          payload.F32(m.panY);
         } else if constexpr (std::is_same_v<T, CameraState>) {
           type = MsgType::CameraState;
           payload.U8(m.lenses);
@@ -275,6 +287,7 @@ std::vector<uint8_t> Encode(const Message& message) {
           payload.Bool(m.reactionsSupported);
           payload.Bool(m.reactionsEnabled);
           payload.Bool(m.gesturesEnabled);
+          payload.Bool(m.flipped);
         } else if constexpr (std::is_same_v<T, BackgroundImage>) {
           type = MsgType::BackgroundImage;
           payload.Bytes(m.jpeg);
@@ -327,6 +340,15 @@ uint32_t DefaultBitrateKbps(uint16_t height, uint8_t fps) {
   if (height == 1080) return fps > 30 ? 25000 : 16000;
   if (height == 2160) return 45000;
   return 16000;
+}
+
+uint32_t DefaultBitrateKbps(uint16_t width, uint16_t height, uint8_t fps) {
+  const uint16_t shortSide = std::min(width, height);
+  const uint16_t longSide = std::max(width, height);
+  if (uint32_t(longSide) * 9 == uint32_t(shortSide) * 16) return DefaultBitrateKbps(shortSide, fps);
+  const double pixels = double(width) * height / (1920.0 * 1080.0);
+  const double kbps = DefaultBitrateKbps(uint16_t(1080), fps) * pixels;
+  return uint32_t(std::clamp(kbps, 4000.0, 50000.0)) / 500 * 500;
 }
 
 }  // namespace webicam::proto

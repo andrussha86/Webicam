@@ -33,7 +33,7 @@ enum class PresetNameError { None, Empty, TooLong, BadChar, Builtin, Exists };
 PresetNameError ValidatePresetName(std::string_view name, const std::vector<Preset>& user, bool allowOverwrite);
 bool SameNameIgnoreCase(std::string_view a, std::string_view b);
 
-// The exact format if the phone has it; else the same size at min(wanted fps, phone max fps);
+// The exact format if the phone has it (either way round: portrait is a turned landscape format); else the same size at min(wanted fps, phone max fps);
 // nullopt when the phone lacks the size.
 std::optional<proto::Configure> MatchFormat(const proto::Configure& wanted,
                                             const std::vector<proto::CaptureFormat>& phone);

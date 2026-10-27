@@ -137,6 +137,11 @@ TEST(Protocol, RejectsBackgroundModeFour) {
   EXPECT_EQ(ParseSettingsWith(35, std::span(&mode, 1)), MessageParser::Result::Error);
 }
 
+TEST(Protocol, RejectsRotationThree) {
+  const uint8_t rotation = 3;
+  EXPECT_EQ(ParseSettingsWith(33, std::span(&rotation, 1)), MessageParser::Result::Error);
+}
+
 TEST(Protocol, RejectsColorHighByte) {
   const uint8_t color[4] = {0x00, 0x00, 0x00, 0x01};
   EXPECT_EQ(ParseSettingsWith(36, color), MessageParser::Result::Error);

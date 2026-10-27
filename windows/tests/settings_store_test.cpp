@@ -7,8 +7,21 @@ using namespace webicam;
 TEST(SettingsStore, RoundTrip) {
   StoredSettings s;
   s.configure = proto::Configure{3840, 2160, 30, 45000};
-  s.camera = {proto::Lens::Front, 1.5f, true, 640.0f, 4000, -1.5f, true, 3200.0f, -12.5f, true, 0.125f, 70, true};
+  s.camera = {proto::Lens::Front, 1.5f, true, 640.0f, 4000, -1.5f, true, 3200.0f, -12.5f, true, 0.125f, 70,
+              proto::Rotation::Flipped};
+  s.camera.mirrorHorizontal = true;
+  s.camera.mirrorVertical = true;
+  s.camera.zoom = 2.0f;
+  s.camera.panX = 0.3125f;
+  s.camera.panY = 0.75f;
   EXPECT_EQ(ParseSettings(SerializeSettings(s)), s);
+}
+
+TEST(SettingsStore, LegacyRotateSwitch) {
+  EXPECT_EQ(ParseSettings("rotate180=1\n").camera.rotation, proto::Rotation::Flipped);
+  EXPECT_EQ(ParseSettings("rotate180=0\n").camera.rotation, proto::Rotation::Auto);
+  EXPECT_EQ(ParseSettings("rotation=3\n").camera.rotation, proto::Rotation::Auto);
+  EXPECT_EQ(ParseSettings("pan_x=1.5\n").camera.panX, 0.5f);
 }
 
 TEST(SettingsStore, DefaultsWithoutConfigure) {

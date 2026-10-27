@@ -31,10 +31,13 @@ TEST(ChooseOutput, SizeMismatchGivesPlaceholder) {
   EXPECT_EQ(ChooseOutput(10'000, 9'900, true, k720, 1920, 1080), OutputKind::Placeholder);
 }
 
-TEST(AdvertisedFormats, SevenFormatsAndNo4K60) {
+TEST(AdvertisedFormats, LandscapeFirstAndNo4K60) {
   auto formats = AdvertisedFormats();
-  EXPECT_EQ(formats.size(), 7u);
+  EXPECT_EQ(formats.size(), 15u);
   EXPECT_EQ(formats[0], (OutputFormat{1920, 1080, 30}));
   EXPECT_TRUE(std::ranges::find(formats, OutputFormat{3840, 2160, 30}) != formats.end());
   EXPECT_TRUE(std::ranges::find(formats, OutputFormat{3840, 2160, 60}) == formats.end());
+  EXPECT_TRUE(std::ranges::find(formats, OutputFormat{1080, 1920, 30}) != formats.end());
+  EXPECT_TRUE(std::ranges::find(formats, OutputFormat{1440, 1080, 30}) != formats.end());
+  for (const auto& f : formats) EXPECT_LE(f.height, 2160u) << f.width << "x" << f.height;
 }

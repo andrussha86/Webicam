@@ -7,7 +7,9 @@
 namespace webicam {
 
 std::span<const OutputFormat> AdvertisedFormats() {
-  static constexpr std::array<OutputFormat, 7> kFormats{{
+  // Landscape 16:9 first (what most apps pick), then the shapes the phone can also stream:
+  // portrait for vertical video and 4:3, both ways round.
+  static constexpr std::array<OutputFormat, 15> kFormats{{
       {1920, 1080, 30},
       {1920, 1080, 60},
       {1280, 720, 30},
@@ -15,6 +17,14 @@ std::span<const OutputFormat> AdvertisedFormats() {
       {640, 360, 30},
       {640, 360, 60},
       {3840, 2160, 30},
+      {1080, 1920, 30},
+      {1080, 1920, 60},
+      {720, 1280, 30},
+      {1440, 1080, 30},
+      {1440, 1080, 60},
+      {960, 720, 30},
+      {640, 480, 30},
+      {1080, 1440, 30},
   }};
   return kFormats;
 }

@@ -17,10 +17,12 @@ namespace webicam {
 class BackgroundLibrary {
  public:
   explicit BackgroundLibrary(std::filesystem::path dir);
+  const std::filesystem::path& Dir() const { return dir_; }
 
   // File names, oldest first.
   std::vector<std::string> List() const;
-  // Copies a readable picture in as <FNV-1a 64, 16 hex>.<ext>; returns its name or a Russian error.
+  // Stores a readable picture as <FNV-1a 64 of the file, 16 hex>.jpg, at most 3840 px on its long side;
+  // returns its name or a Russian error. Decodes the whole picture: keep it off the UI thread.
   std::expected<std::string, std::string> Add(const std::filesystem::path& source);
   // Refuses while a preset uses the file: «Используется в пресете „…“».
   std::expected<void, std::string> Remove(const std::string& name, const std::vector<Preset>& presets);

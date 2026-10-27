@@ -9,7 +9,7 @@
 
 namespace webicam::proto {
 
-inline constexpr uint16_t kProtocolVersion = 3;
+inline constexpr uint16_t kProtocolVersion = 4;
 inline constexpr uint16_t kPhonePort = 47800;
 inline constexpr uint32_t kMaxPayloadBytes = 16u * 1024 * 1024;
 
@@ -78,6 +78,10 @@ inline constexpr int kLensCount = 5;
 enum class BackgroundMode : uint8_t { Off = 0, Blur = 1, Image = 2, Color = 3 };
 inline constexpr int kBackgroundModeCount = 4;
 
+// Auto follows how the phone is held, but only ever turns the picture by 180°.
+enum class Rotation : uint8_t { Auto = 0, Upright = 1, Flipped = 2 };
+inline constexpr int kRotationCount = 3;
+
 // Full snapshot of the PC's camera choices; the phone clamps every value to the active lens.
 struct CameraSettings {
   Lens lens = Lens::Wide;
@@ -92,10 +96,15 @@ struct CameraSettings {
   bool manualFocus = false;
   float lensPosition = 0.5f;  // 0 near … 1 far
   uint8_t blur = 0;           // 0 off … 100 strongest
-  bool rotate180 = false;
+  Rotation rotation = Rotation::Auto;
   bool faceFocus = false;  // face-driven focus/exposure while those are on auto
   BackgroundMode backgroundMode = BackgroundMode::Off;
   uint32_t backgroundColor = 0x1F2125;  // 0x00RRGGBB
+  bool mirrorHorizontal = false;
+  bool mirrorVertical = false;
+  // Centre of the zoomed area in the output frame, 0…1 from the top left; the phone keeps the area inside.
+  float panX = 0.5f;
+  float panY = 0.5f;
   bool operator==(const CameraSettings&) const = default;
 };
 
@@ -116,6 +125,7 @@ struct CameraState {
   bool reactionsSupported = false;  // by the active format
   bool reactionsEnabled = false;    // iOS Control Center, Video Effects
   bool gesturesEnabled = false;
+  bool flipped = false;  // the picture is currently turned by 180° (manually or by Auto)
   bool operator==(const CameraState&) const = default;
 };
 
@@ -146,5 +156,7 @@ class MessageParser {
 };
 
 uint32_t DefaultBitrateKbps(uint16_t height, uint8_t fps);
+// Any frame shape: 16:9 either way round uses the table above, others scale it by pixel count.
+uint32_t DefaultBitrateKbps(uint16_t width, uint16_t height, uint8_t fps);
 
 }  // namespace webicam::proto

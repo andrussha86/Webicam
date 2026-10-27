@@ -101,6 +101,16 @@ TEST_F(ImageTest, LibraryAddDedupes) {
   EXPECT_EQ(FileCount(dir_ / "backgrounds"), 1u);
 }
 
+TEST_F(ImageTest, LibraryAddShrinksLargePictures) {
+  BackgroundLibrary library(dir_ / "backgrounds");
+  const auto name = library.Add(Write("wide.jpg", EncodeJpeg(RenderBuiltinBackground(1, 5000, 100))));
+  ASSERT_TRUE(name) << name.error();
+  const auto stored = LoadImageFile(dir_ / "backgrounds" / *name);
+  ASSERT_TRUE(stored);
+  EXPECT_EQ(stored->width, 3840u);
+  EXPECT_EQ(stored->height, 77u);
+}
+
 TEST_F(ImageTest, LibraryAddRejectsGarbage) {
   const std::string text = "not an image";
   BackgroundLibrary library(dir_ / "backgrounds");

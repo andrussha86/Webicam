@@ -16,7 +16,8 @@ class FrameScaler {
  public:
   static std::unique_ptr<FrameScaler> Create(const D3DContext& d3d);
 
-  // Aspect-fill (center crop) into outW×outH NV12, read back to CPU with stride = outW.
+  // Into outW×outH NV12, read back to CPU with stride = outW: aspect-fill (center crop) when both are
+  // landscape or both portrait, aspect-fit with black bars when the orientations differ.
   bool ToNv12Cpu(const DecodedFrame& in, uint32_t outW, uint32_t outH, std::vector<uint8_t>& out);
   // Aspect-fit into at most maxW×maxH BGRA for the UI; the view stays valid until the next call.
   ID3D11ShaderResourceView* ToPreview(const DecodedFrame& in, uint32_t maxW, uint32_t maxH);

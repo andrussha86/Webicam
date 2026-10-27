@@ -73,7 +73,7 @@ TEST(DeviceSession, HandshakeDeliversHello) {
   EXPECT_EQ(hello->version, proto::kProtocolVersion);
   EXPECT_TRUE(hello->formats.empty());
   h.SendFromPhone(PhoneHello());
-  EXPECT_TRUE(WaitFor([&] { return formats == 3; }));
+  EXPECT_TRUE(WaitFor([&] { return formats == 4; }));
 }
 
 TEST(DeviceSession, VersionMismatchCloses) {

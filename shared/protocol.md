@@ -1,4 +1,4 @@
-# Webicam protocol, version 3
+# Webicam protocol, version 4
 
 Normative description of the wire protocol between the iPhone app and `webicam.exe`.
 Both implementations (`windows/core/src/protocol.cpp`, `ios/WebicamCore`) must parse and
@@ -29,14 +29,14 @@ protocol error and closes the connection.
 | Type | Code | Direction | Payload |
 |---|---|---|---|
 | Hello | 0x01 | both, first message | `version: u16`; the phone appends `model: str`, `formats: [width u16, height u16, max_fps u8]`. The PC sends only `version` (payload length 2). |
-| Configure | 0x02 | PC → phone | `width: u16, height: u16, fps: u8, bitrate_kbps: u32` |
+| Configure | 0x02 | PC → phone | `width: u16, height: u16, fps: u8, bitrate_kbps: u32` — the size of the frames sent; `width < height` is portrait (see Rules) |
 | VideoFrame | 0x03 | phone → PC | `capture_time_us: u64` (phone monotonic clock), `flags: u8` (bit 0 = keyframe), then H.264 Annex B to the end of the payload. Keyframes carry SPS/PPS. |
 | RequestKeyframe | 0x04 | PC → phone | empty |
 | Ping | 0x05 | PC → phone | `pc_time_us: u64` |
 | Pong | 0x06 | phone → PC | `pc_time_us: u64` (echoed), `phone_time_us: u64` |
 | Status | 0x07 | phone → PC | `state: u8` (0 streaming, 1 stopped by user, 2 thermal throttled, 3 error), `thermal: u8` (0 nominal, 1 fair, 2 serious, 3 critical), `message: str` |
-| CameraSettings | 0x08 | PC → phone | `lens: u8, zoom: f32, manual_exposure: bool, iso: f32, shutter_us: u32, exposure_bias: f32, manual_wb: bool, temperature_k: f32, tint: f32, manual_focus: bool, lens_position: f32, blur: u8, rotate180: bool, face_focus: bool, background_mode: u8, background_color: u32` |
-| CameraState | 0x09 | phone → PC | `lenses: u8` (bit i = lens i present), `lens: u8, iso_min: f32, iso_max: f32, shutter_min_us: u32, shutter_max_us: u32, bias_min: f32, bias_max: f32, zoom_max: f32, manual_focus_supported: bool, iso: f32, shutter_us: u32, temperature_k: f32, tint: f32, lens_position: f32, reactions_supported: bool, reactions_enabled: bool, gestures_enabled: bool` |
+| CameraSettings | 0x08 | PC → phone | `lens: u8, zoom: f32, manual_exposure: bool, iso: f32, shutter_us: u32, exposure_bias: f32, manual_wb: bool, temperature_k: f32, tint: f32, manual_focus: bool, lens_position: f32, blur: u8, rotation: u8, face_focus: bool, background_mode: u8, background_color: u32, mirror_h: bool, mirror_v: bool, pan_x: f32, pan_y: f32` |
+| CameraState | 0x09 | phone → PC | `lenses: u8` (bit i = lens i present), `lens: u8, iso_min: f32, iso_max: f32, shutter_min_us: u32, shutter_max_us: u32, bias_min: f32, bias_max: f32, zoom_max: f32, manual_focus_supported: bool, iso: f32, shutter_us: u32, temperature_k: f32, tint: f32, lens_position: f32, reactions_supported: bool, reactions_enabled: bool, gestures_enabled: bool, flipped: bool` |
 | BackgroundImage | 0x0A | PC → phone | JPEG to the end of the payload; empty = no picture |
 
 Lenses: 0 ultra wide (0.5×), 1 wide (1×), 2 wide at 2× (48 MP crop), 3 telephoto, 4 front;
@@ -48,10 +48,23 @@ auto exposure.
 protocol error. `background_color` is `0x00RRGGBB`; a non-zero top byte is a protocol error.
 `face_focus` turns on face-driven focus and exposure while those are on auto.
 
+`rotation`: 0 auto, 1 upright, 2 turned by 180°; ≥ 3 is a protocol error. Auto follows how the phone
+is held (gravity) but only ever chooses between upright and 180°, never between landscape and portrait.
+`flipped` in CameraState says whether the picture is turned by 180° right now.
+
+`mirror_h` mirrors the output left to right, `mirror_v` top to bottom (both = turned by 180°).
+
+`zoom` is a crop of the output frame scaled back to its size; `pan_x`, `pan_y` are the centre of the
+cropped area in output coordinates, 0…1 from the top left. The phone clamps them so the area stays
+inside the frame; 0.5, 0.5 is the centre.
+
 ## Rules
 
 - Both sides send Hello first. On a version mismatch the connection is closed and the UI
   says which side to update.
+- Hello formats are the phone's landscape capture sizes (16:9 and native 4:3). A Configure may name one
+  of them as is, or turned (`width < height`): the phone then turns the picture by 90° and sends
+  portrait frames of exactly that size.
 - Streaming starts only after Configure. Each Configure reconfigures capture and encoder; the
   first frame after it is a keyframe. After each Configure the phone sends a Status with its
   actual state and a CameraState.
@@ -73,15 +86,15 @@ protocol error. `background_color` is `0x00RRGGBB`; a non-zero top byte is a pro
 
 | File | Value | Bytes |
 |---|---|---|
-| `hello_pc.bin` | Hello{3} | `01 02 00 00 00 03 00` |
-| `hello_phone.bin` | Hello{3, "iPhone16,1", [1280×720@60, 1920×1080@60, 3840×2160@30]} | `01 1F 00 00 00 03 00 0A 00 69 50 68 6F 6E 65 31 36 2C 31 03 00 00 05 D0 02 3C 80 07 38 04 3C 00 0F 70 08 1E` |
+| `hello_pc.bin` | Hello{4} | `01 02 00 00 00 04 00` |
+| `hello_phone.bin` | Hello{4, "iPhone16,1", [1280×720@60, 1920×1080@60, 1920×1440@60, 3840×2160@30]} | `01 24 00 00 00 04 00 0A 00 69 50 68 6F 6E 65 31 36 2C 31 04 00 00 05 D0 02 3C 80 07 38 04 3C 80 07 A0 05 3C 00 0F 70 08 1E` |
 | `configure_1080p60.bin` | Configure{1920, 1080, 60, 25000} | `02 09 00 00 00 80 07 38 04 3C A8 61 00 00` |
 | `video_frame_key.bin` | VideoFrame{123456789, key, `00 00 00 01 67 42 00 1F`} | `03 11 00 00 00 15 CD 5B 07 00 00 00 00 01 00 00 00 01 67 42 00 1F` |
 | `request_keyframe.bin` | RequestKeyframe | `04 00 00 00 00` |
 | `ping.bin` | Ping{1000} | `05 08 00 00 00 E8 03 00 00 00 00 00 00` |
 | `pong.bin` | Pong{1000, 2000} | `06 10 00 00 00 E8 03 00 00 00 00 00 00 D0 07 00 00 00 00 00 00` |
 | `status_thermal.bin` | Status{thermal throttled, 2, "serious"} | `07 0B 00 00 00 02 02 07 00 73 65 72 69 6F 75 73` |
-| `camera_settings.bin` | CameraSettings{telephoto, 1.5, manual, 400, 8000, −0.5, manual, 4500, 10, manual, 0.25, 60, rotate, face, image, 0x336699} | `08 28 00 00 00 03 00 00 C0 3F 01 00 00 C8 43 40 1F 00 00 00 00 00 BF 01 00 A0 8C 45 00 00 20 41 01 00 00 80 3E 3C 01 01 02 99 66 33 00` |
-| `camera_state.bin` | CameraState{0x1F, wide, 50…3200, 20…16666 µs, −8…8, 10, focus, 200, 10000, 5200, −5, 0.75, reactions supported, enabled, no gestures} | `09 36 00 00 00 1F 01 00 00 48 42 00 00 48 45 14 00 00 00 1A 41 00 00 00 00 00 C1 00 00 00 41 00 00 20 41 01 00 00 48 43 10 27 00 00 00 80 A2 45 00 00 A0 C0 00 00 40 3F 01 01 00` |
+| `camera_settings.bin` | CameraSettings{telephoto, 1.5, manual, 400, 8000, −0.5, manual, 4500, 10, manual, 0.25, 60, turned 180°, face, image, 0x336699, mirror_h, no mirror_v, 0.25, 0.75} | `08 32 00 00 00 03 00 00 C0 3F 01 00 00 C8 43 40 1F 00 00 00 00 00 BF 01 00 A0 8C 45 00 00 20 41 01 00 00 80 3E 3C 02 01 02 99 66 33 00 01 00 00 00 80 3E 00 00 40 3F` |
+| `camera_state.bin` | CameraState{0x1F, wide, 50…3200, 20…16666 µs, −8…8, 10, focus, 200, 10000, 5200, −5, 0.75, reactions supported, enabled, no gestures, flipped} | `09 37 00 00 00 1F 01 00 00 48 42 00 00 48 45 14 00 00 00 1A 41 00 00 00 00 00 C1 00 00 00 41 00 00 20 41 01 00 00 48 43 10 27 00 00 00 80 A2 45 00 00 A0 C0 00 00 40 3F 01 01 00 01` |
 | `background_image.bin` | BackgroundImage{`FF D8 FF`} | `0A 03 00 00 00 FF D8 FF` |
 | `background_image_empty.bin` | BackgroundImage{} | `0A 00 00 00 00` |

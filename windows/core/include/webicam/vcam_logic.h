@@ -19,7 +19,7 @@ struct OutputFormat {
   bool operator==(const OutputFormat&) const = default;
 };
 
-// Formats the virtual camera advertises; 1080p30 first (the default).
+// Formats the virtual camera advertises; 1080p30 first (the default), then portrait and 4:3 ones.
 std::span<const OutputFormat> AdvertisedFormats();
 
 enum class OutputKind { Frame, NoSignalDimmed, Placeholder };

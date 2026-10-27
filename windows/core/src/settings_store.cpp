@@ -67,7 +67,11 @@ void AppendCameraKeys(std::string& out, const proto::CameraSettings& c) {
   out += "manual_focus=" + std::to_string(c.manualFocus) + "\n";
   out += "lens_position=" + F(c.lensPosition) + "\n";
   out += "blur=" + std::to_string(unsigned(c.blur)) + "\n";
-  out += "rotate180=" + std::to_string(c.rotate180) + "\n";
+  out += "rotation=" + std::to_string(unsigned(c.rotation)) + "\n";
+  out += "mirror_h=" + std::to_string(c.mirrorHorizontal) + "\n";
+  out += "mirror_v=" + std::to_string(c.mirrorVertical) + "\n";
+  out += "pan_x=" + F(c.panX) + "\n";
+  out += "pan_y=" + F(c.panY) + "\n";
   out += "face_focus=" + std::to_string(c.faceFocus) + "\n";
   out += "background_mode=" + std::to_string(unsigned(c.backgroundMode)) + "\n";
   out += std::string("background_color=") + color + "\n";
@@ -87,7 +91,22 @@ bool ParseCameraKey(std::string_view key, std::string_view value, proto::CameraS
   if (key == "manual_focus") return ParseBool(value, c.manualFocus);
   if (key == "lens_position") return ParseNumber(value, c.lensPosition);
   if (key == "blur") return ParseNumber(value, u) && u <= 100 && (c.blur = uint8_t(u), true);
-  if (key == "rotate180") return ParseBool(value, c.rotate180);
+  if (key == "rotation") {
+    return ParseNumber(value, u) && u < unsigned(proto::kRotationCount) && (c.rotation = proto::Rotation(u), true);
+  }
+  // 0.3 and older: a manual switch; off now means Auto.
+  if (key == "rotate180") {
+    bool flipped = false;
+    return ParseBool(value, flipped) && (c.rotation = flipped ? proto::Rotation::Flipped : proto::Rotation::Auto, true);
+  }
+  if (key == "mirror_h") return ParseBool(value, c.mirrorHorizontal);
+  if (key == "mirror_v") return ParseBool(value, c.mirrorVertical);
+  if (key == "pan_x" || key == "pan_y") {
+    float pan = 0;
+    if (!ParseNumber(value, pan) || pan < 0 || pan > 1) return false;
+    (key == "pan_x" ? c.panX : c.panY) = pan;
+    return true;
+  }
   if (key == "face_focus") return ParseBool(value, c.faceFocus);
   if (key == "background_mode") {
     return ParseNumber(value, u) && u < unsigned(proto::kBackgroundModeCount) &&
