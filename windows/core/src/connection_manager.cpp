@@ -208,14 +208,14 @@ void ConnectionManager::TryConnect() {
     return;
   }
   if (!target) {
-    SetState(ConnState::ChooseDevice, "Подключено несколько iPhone — выберите нужный");
+    SetState(ConnState::ChooseDevice, "Подключено несколько iPhone, выберите нужный");
     return;
   }
   auto socket = usbmux_.Connect(*target, proto::kPhonePort);
   if (!socket) {
     if (socket.error() == UsbmuxError::ConnectionRefused) {
       SetState(ConnState::PhoneAppNotOpen,
-               "Откройте Webicam на iPhone. Если он заблокирован — разблокируйте и нажмите «Доверять»");
+               "Откройте Webicam на iPhone. Если он заблокирован, разблокируйте и нажмите «Доверять»");
     } else {
       SetState(ConnState::NoDevice, "Подключите iPhone кабелем");
     }

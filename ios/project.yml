@@ -20,6 +20,7 @@ targets:
         CFBundleShortVersionString: "0.2.0"
         CFBundleVersion: "2"
         NSCameraUsageDescription: "Webicam передаёт видео с камеры на компьютер."
+        UIAppFonts: [Geist-Regular.ttf, Geist-Medium.ttf, Geist-SemiBold.ttf, GeistMono-Medium.ttf]
         UILaunchScreen: {}
         UIRequiresFullScreen: true
         UIStatusBarHidden: true

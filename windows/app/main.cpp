@@ -2,6 +2,7 @@
 // virtual camera and shows a preview with controls.
 //   webicam.exe [--direct host:port]
 #include <windows.h>
+#include <dwmapi.h>
 #include <shellapi.h>
 #include <d3d11.h>
 #include <dxgi1_2.h>
@@ -14,6 +15,7 @@
 #include <memory>
 #include <string>
 
+#include "theme.h"
 #include "ui.h"
 #include "webicam/connection_manager.h"
 #include "webicam/media_foundation.h"
@@ -42,6 +44,7 @@ struct App {
   NOTIFYICONDATAW tray{};
   bool visible = true;
   bool quit = false;
+  float pendingDpiScale = 0;  // set by WM_DPICHANGED, applied before the next frame
 };
 
 App g_app;
@@ -90,6 +93,13 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         CreateRenderTarget();
       }
       return 0;
+    case WM_DPICHANGED: {
+      g_app.pendingDpiScale = float(HIWORD(wParam)) / USER_DEFAULT_SCREEN_DPI;
+      const RECT* suggested = reinterpret_cast<const RECT*>(lParam);
+      SetWindowPos(hwnd, nullptr, suggested->left, suggested->top, suggested->right - suggested->left,
+                   suggested->bottom - suggested->top, SWP_NOZORDER | SWP_NOACTIVATE);
+      return 0;
+    }
     case WM_CLOSE:
       // Closing hides to the tray; the camera keeps working.
       ShowWindow(hwnd, SW_HIDE);
@@ -154,15 +164,24 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
   }
   g_app.d3d = *d3d;
 
+  ImGui_ImplWin32_EnableDpiAwareness();
+  const float dpiScale = ImGui_ImplWin32_GetDpiScaleForMonitor(MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY));
+
   WNDCLASSEXW wc{sizeof(wc), CS_CLASSDC, WndProc, 0, 0, instance, LoadIconW(nullptr, IDI_APPLICATION),
                  LoadCursorW(nullptr, IDC_ARROW), nullptr, nullptr, L"WebicamWindow", nullptr};
   RegisterClassExW(&wc);
   g_app.hwnd = CreateWindowExW(0, wc.lpszClassName, L"Webicam", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
-                               1280, 760, nullptr, nullptr, instance, nullptr);
+                               int(1280 * dpiScale), int(780 * dpiScale), nullptr, nullptr, instance, nullptr);
   if (!CreateSwapChain()) {
     MessageBoxW(nullptr, L"Не удалось создать окно Direct3D.", L"Webicam", MB_ICONERROR);
     return 1;
   }
+  // Dark title bar in the window's own background colour (Windows 11; ignored elsewhere).
+  const BOOL dark = TRUE;
+  DwmSetWindowAttribute(g_app.hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, sizeof(dark));
+  const COLORREF caption = RGB(BYTE(app::theme::kBase.x * 255), BYTE(app::theme::kBase.y * 255),
+                               BYTE(app::theme::kBase.z * 255));
+  DwmSetWindowAttribute(g_app.hwnd, DWMWA_CAPTION_COLOR, &caption, sizeof(caption));
   ShowWindow(g_app.hwnd, SW_SHOWDEFAULT);
 
   g_app.tray.cbSize = sizeof(g_app.tray);
@@ -178,13 +197,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
   ImGui::CreateContext();
   ImGuiIO& io = ImGui::GetIO();
   io.IniFilename = nullptr;
-  wchar_t fontsDir[MAX_PATH];
-  GetWindowsDirectoryW(fontsDir, MAX_PATH);
-  const std::string font = Utf8(std::wstring(fontsDir) + L"\\Fonts\\segoeui.ttf");
-  if (!io.Fonts->AddFontFromFileTTF(font.c_str(), 18.0f, nullptr, io.Fonts->GetGlyphRangesCyrillic())) {
-    io.Fonts->AddFontDefault();
-  }
-  ImGui::StyleColorsDark();
+  app::theme::LoadFonts();
+  app::theme::Apply(ImGui_ImplWin32_GetDpiScaleForHwnd(g_app.hwnd));
   ImGui_ImplWin32_Init(g_app.hwnd);
   ImGui_ImplDX11_Init(g_app.d3d.device.Get(), g_app.d3d.context.Get());
 
@@ -273,12 +287,16 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
       std::lock_guard lock(statusMutex);
       ui.phoneStatus = phoneStatus;
     }
+    if (g_app.pendingDpiScale > 0) {
+      app::theme::Apply(g_app.pendingDpiScale);
+      g_app.pendingDpiScale = 0;
+    }
     ImGui_ImplDX11_NewFrame();
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
     app::DrawUi(ui, *connection, pipeline);
     ImGui::Render();
-    const float clear[4] = {0.08f, 0.08f, 0.09f, 1.0f};
+    const float clear[4] = {app::theme::kBase.x, app::theme::kBase.y, app::theme::kBase.z, 1.0f};
     g_app.d3d.context->OMSetRenderTargets(1, g_app.renderTarget.GetAddressOf(), nullptr);
     g_app.d3d.context->ClearRenderTargetView(g_app.renderTarget.Get(), clear);
     ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());

@@ -49,7 +49,7 @@ final class ControlHandler {
         server.start()
     }
 
-    /// The «Стоп»/«Старт» button.
+    /// The «Пауза»/«Возобновить» button.
     func toggleStopped() {
         stopped.toggle()
         let stopping = stopped
