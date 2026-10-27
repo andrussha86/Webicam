@@ -17,8 +17,9 @@ targets:
       path: WebicamApp/Info.plist
       properties:
         CFBundleDisplayName: Webicam
-        CFBundleShortVersionString: "0.2.1"
-        CFBundleVersion: "3"
+        CFBundleShortVersionString: "0.3.0"
+        CFBundleVersion: "4"
+        NSCameraReactionEffectGesturesEnabledDefault: true
         NSCameraUsageDescription: "Webicam передаёт видео с камеры на компьютер."
         UIAppFonts: [Geist-Regular.ttf, Geist-Medium.ttf, Geist-SemiBold.ttf, GeistMono-Medium.ttf]
         UILaunchScreen: {}

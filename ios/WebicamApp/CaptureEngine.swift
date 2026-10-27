@@ -7,14 +7,19 @@ enum CaptureError: Error {
 }
 
 /// Selected lens → NV12 (420v) pixel buffers with host-clock timestamps, with the PC's
-/// manual controls and optional background blur applied.
+/// manual controls and optional background replacement applied.
 final class CaptureEngine: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     var onFrame: ((CVPixelBuffer, CMTime) -> Void)?
+    /// The background picture cannot be shown; called on the capture queue.
+    var onBackgroundError: (() -> Void)? {
+        get { compositor.onImageError }
+        set { compositor.onImageError = newValue }
+    }
 
     private let session = AVCaptureSession()
     private let output = AVCaptureVideoDataOutput()
     private let queue = DispatchQueue(label: "webicam.capture", qos: .userInteractive)
-    private let blur = BackgroundBlur()
+    private let compositor = BackgroundCompositor()
     private var configured = false
     // Owned by `queue`.
     private var input: AVCaptureDeviceInput?
@@ -86,6 +91,7 @@ final class CaptureEngine: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
     func apply(_ new: CameraSettings) throws {
         try queue.sync {
             let previousLens = settings.lens
+            if new.backgroundMode != settings.backgroundMode { compositor.reset() }
             settings = new
             guard format != nil else { return }
             if Self.device(for: new.lens)?.uniqueID != input?.device.uniqueID || activeLens == nil {
@@ -99,8 +105,12 @@ final class CaptureEngine: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
                 activeLens = new.lens
                 try updateControls()
             }
-            if new.blur == 0 { blur.reset() }
         }
+    }
+
+    /// The PC's picture for image mode.
+    func setBackgroundImage(_ jpeg: Data) {
+        queue.async { [compositor] in compositor.setImage(jpeg) }
     }
 
     /// Ranges of the active lens and its current values; nil before the first Configure.
@@ -125,6 +135,9 @@ final class CaptureEngine: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
             s.temperatureK = wb.temperature
             s.tint = wb.tint
             s.lensPosition = device.lensPosition
+            s.reactionsSupported = format.reactionEffectsSupported
+            s.reactionsEnabled = AVCaptureDevice.reactionEffectsEnabled
+            s.gesturesEnabled = AVCaptureDevice.reactionEffectGesturesEnabled
             return s
         }
     }
@@ -145,8 +158,8 @@ final class CaptureEngine: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
                        from connection: AVCaptureConnection) {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         var frame = pixelBuffer
-        if settings.blur > 0, let blurred = blur.process(pixelBuffer, strength: settings.blur) {
-            frame = blurred
+        if let composed = compositor.process(pixelBuffer, settings: settings) {
+            frame = composed
         }
         onFrame?(frame, CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
     }
@@ -186,7 +199,7 @@ final class CaptureEngine: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
             }
             session.addInput(newInput)
             input = newInput
-            blur.reset()
+            compositor.reset()
         }
         try device.lockForConfiguration()
         device.activeFormat = chosen
@@ -248,6 +261,13 @@ final class CaptureEngine: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         } else if device.isFocusModeSupported(.continuousAutoFocus) {
             device.focusMode = .continuousAutoFocus
         }
+
+        // Face-driven focus and exposure, set explicitly so the system never decides on its own;
+        // they only matter while the parameter is on auto.
+        device.automaticallyAdjustsFaceDrivenAutoFocusEnabled = false
+        device.isFaceDrivenAutoFocusEnabled = s.faceFocus && !s.manualFocus
+        device.automaticallyAdjustsFaceDrivenAutoExposureEnabled = false
+        device.isFaceDrivenAutoExposureEnabled = s.faceFocus && !s.manualExposure
     }
 
     private func applyRotation() {

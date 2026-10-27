@@ -35,6 +35,11 @@ final class ControlHandler {
         server.onFrameDropped = { [encoder] in encoder.forceKeyframe() }
         server.onConnectionChange = { [weak self] connected in self?.connectionChanged(connected) }
         server.onMessage = { [weak self] message in self?.handle(message) }
+        capture.onBackgroundError = { [weak self] in
+            guard let self else { return }
+            self.server.send(.status(state: .error, thermal: self.thermalLevel(),
+                                     message: "Не удалось открыть картинку фона"))
+        }
         NotificationCenter.default.addObserver(
             forName: ProcessInfo.thermalStateDidChangeNotification, object: nil, queue: nil
         ) { [weak self] _ in self?.thermalChanged() }
@@ -93,6 +98,8 @@ final class ControlHandler {
             encoder.forceKeyframe()
         case let .ping(pcTimeUs):
             server.send(.pong(pcTimeUs: pcTimeUs, phoneTimeUs: hostTimeUs()))
+        case let .backgroundImage(jpeg):
+            capture.setBackgroundImage(jpeg)
         default:
             break
         }
