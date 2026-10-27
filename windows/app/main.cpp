@@ -17,9 +17,12 @@
 
 #include "theme.h"
 #include "ui.h"
+#include "webicam/background_library.h"
 #include "webicam/connection_manager.h"
+#include "webicam/image_codec.h"
 #include "webicam/media_foundation.h"
 #include "webicam/pipeline.h"
+#include "webicam/presets.h"
 #include "webicam/settings_store.h"
 #include "webicam/single_instance.h"
 #include "webicam/vcam_logic.h"
@@ -261,14 +264,51 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
   connectionPtr = connection.get();
   if (direct) connection->SetDirect(direct->first, direct->second);
 
+  // The picture behind the person: rendered on the session thread at the stream size, cached until
+  // the picture or the size changes. COM is already MTA process-wide (Media Foundation).
+  BackgroundLibrary library(DefaultBackgroundsDir());
+  app::ThumbnailCache thumbnails(g_app.d3d.device.Get());
+  std::mutex backgroundMutex;
+  std::string backgroundRef = "builtin:0";
+  std::string backgroundKey;
+  std::vector<uint8_t> backgroundJpeg;
+  connection->SetBackgroundSource([&](uint16_t width, uint16_t height) {
+    std::string ref;
+    {
+      std::lock_guard lock(backgroundMutex);
+      ref = backgroundRef;
+      if (backgroundKey == ref + "@" + std::to_string(width) + "x" + std::to_string(height)) return backgroundJpeg;
+    }
+    const auto image = library.Resolve(ref, width, height);
+    auto jpeg = image ? EncodeJpeg(*image) : std::vector<uint8_t>{};
+    std::lock_guard lock(backgroundMutex);
+    backgroundKey = ref + "@" + std::to_string(width) + "x" + std::to_string(height);
+    backgroundJpeg = jpeg;
+    return jpeg;
+  });
+  app::UiServices services{g_app.hwnd, library, thumbnails, [&](const std::string& ref) {
+                             {
+                               std::lock_guard lock(backgroundMutex);
+                               if (backgroundRef == ref) return;
+                               backgroundRef = ref;
+                             }
+                             connection->InvalidateBackground();
+                           }};
+
   const auto settingsPath = DefaultSettingsPath();
   StoredSettings saved = LoadSettings(settingsPath);
   if (saved.configure) connection->SetDesiredConfigure(*saved.configure);
+  backgroundRef = saved.backgroundImage;
   connection->SetDesiredCamera(saved.camera);
   ui.chosenConfigure = saved.configure;
   ui.camera = saved.camera;
+  ui.backgroundImage = saved.backgroundImage;
+  ui.activePreset = saved.preset;
+  ui.userPresets = LoadPresets(DefaultPresetsPath());
   uint64_t settingsChangedMs = 0;
-  auto currentSettings = [&] { return StoredSettings{ui.chosenConfigure, connection->DesiredCamera()}; };
+  auto currentSettings = [&] {
+    return StoredSettings{ui.chosenConfigure, connection->DesiredCamera(), ui.backgroundImage, ui.activePreset};
+  };
   connection->Start();
 
   while (!g_app.quit) {
@@ -294,7 +334,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     ImGui_ImplDX11_NewFrame();
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
-    app::DrawUi(ui, *connection, pipeline);
+    app::DrawUi(ui, *connection, pipeline, services);
     ImGui::Render();
     const float clear[4] = {app::theme::kBase.x, app::theme::kBase.y, app::theme::kBase.z, 1.0f};
     g_app.d3d.context->OMSetRenderTargets(1, g_app.renderTarget.GetAddressOf(), nullptr);

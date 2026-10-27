@@ -1,12 +1,18 @@
 #pragma once
 
+#include <windows.h>
+
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
 
+#include "thumbnails.h"
+#include "webicam/background_library.h"
 #include "webicam/connection_manager.h"
 #include "webicam/pipeline.h"
+#include "webicam/presets.h"
 
 namespace webicam::app {
 
@@ -18,9 +24,29 @@ struct UiState {
   std::optional<proto::Configure> chosenConfigure;  // last applied by the user; saved to settings
   proto::CameraSettings camera;                     // edited here, sent to the phone throttled
   uint64_t lastCameraSendMs = 0;
+
+  std::vector<Preset> userPresets;
+  std::string activePreset;                   // last applied or saved; "" = none
+  std::string backgroundImage = "builtin:0";  // "builtin:N" or a file in the backgrounds folder
+  std::string presetHint;                     // shown under the preset section
+  bool presetHintIsError = false;
+  std::string backgroundError;  // add/remove picture failed
+};
+
+// Things the sidebar needs besides the connection.
+struct UiServices {
+  HWND window = nullptr;
+  BackgroundLibrary& library;
+  ThumbnailCache& thumbnails;
+  // Records the picture the phone should get and resends it if it is on screen.
+  std::function<void(const std::string& ref)> setBackground;
 };
 
 // Draws the whole window with Dear ImGui.
-void DrawUi(UiState& state, ConnectionManager& connection, Pipeline& pipeline);
+void DrawUi(UiState& state, ConnectionManager& connection, Pipeline& pipeline, UiServices& services);
+
+// Sections in their own files.
+void DrawPresetSection(UiState& state, ConnectionManager& connection, UiServices& services);
+void DrawBackgroundSection(UiState& state, ConnectionManager& connection, UiServices& services);
 
 }  // namespace webicam::app
