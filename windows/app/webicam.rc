@@ -1,5 +1,7 @@
 #include "resource.h"
 
+IDI_APP ICON "icon/webicam.ico"
+
 // Geist and Geist Mono, SIL Open Font License 1.1 (fonts/OFL.txt).
 IDR_FONT_REGULAR RCDATA "fonts/Geist-Regular.ttf"
 IDR_FONT_MEDIUM RCDATA "fonts/Geist-Medium.ttf"

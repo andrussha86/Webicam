@@ -15,6 +15,7 @@
 #include <memory>
 #include <string>
 
+#include "resource.h"
 #include "theme.h"
 #include "ui.h"
 #include "webicam/background_library.h"
@@ -170,8 +171,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
   ImGui_ImplWin32_EnableDpiAwareness();
   const float dpiScale = ImGui_ImplWin32_GetDpiScaleForMonitor(MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY));
 
-  WNDCLASSEXW wc{sizeof(wc), CS_CLASSDC, WndProc, 0, 0, instance, LoadIconW(nullptr, IDI_APPLICATION),
-                 LoadCursorW(nullptr, IDC_ARROW), nullptr, nullptr, L"WebicamWindow", nullptr};
+  const auto icon = [&](int metricX, int metricY) {
+    return HICON(LoadImageW(instance, MAKEINTRESOURCEW(IDI_APP), IMAGE_ICON, GetSystemMetrics(metricX),
+                            GetSystemMetrics(metricY), LR_DEFAULTCOLOR));
+  };
+  const HICON smallIcon = icon(SM_CXSMICON, SM_CYSMICON);
+  WNDCLASSEXW wc{sizeof(wc), CS_CLASSDC, WndProc, 0, 0, instance, icon(SM_CXICON, SM_CYICON),
+                 LoadCursorW(nullptr, IDC_ARROW), nullptr, nullptr, L"WebicamWindow", smallIcon};
   RegisterClassExW(&wc);
   g_app.hwnd = CreateWindowExW(0, wc.lpszClassName, L"Webicam", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
                                int(1280 * dpiScale), int(780 * dpiScale), nullptr, nullptr, instance, nullptr);
@@ -192,7 +198,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
   g_app.tray.uID = 1;
   g_app.tray.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
   g_app.tray.uCallbackMessage = kTrayMessage;
-  g_app.tray.hIcon = wc.hIcon;
+  g_app.tray.hIcon = smallIcon;
   wcscpy_s(g_app.tray.szTip, L"Webicam");
   Shell_NotifyIconW(NIM_ADD, &g_app.tray);
 

@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "file_dialog.h"
 #include "thumbnails.h"
 #include "webicam/background_library.h"
 #include "webicam/connection_manager.h"
@@ -16,9 +17,15 @@
 
 namespace webicam::app {
 
+// Sidebar tabs: what the picture is (format, lens, zoom, orientation), how the camera exposes it,
+// what is behind the person.
+enum class Tab { Frame = 0, Camera = 1, Background = 2 };
+inline constexpr int kTabCount = 3;
+
 struct UiState {
-  int formatIndex = -1;  // index into the capture choices; -1 = follow the connection's current config
+  Tab tab = Tab::Frame;
   float bitrateMbps = 0;
+  bool bitrateDragging = false;
   std::string cameraError;  // virtual camera registration problem, if any
   std::string phoneStatus;  // last Status message from the phone
   std::optional<proto::Configure> chosenConfigure;  // last applied by the user; saved to settings
@@ -31,6 +38,7 @@ struct UiState {
   std::string presetHint;                     // shown under the preset section
   bool presetHintIsError = false;
   std::string backgroundError;  // add/remove picture failed
+  ImagePicker picker;           // «+» tile: open dialog, then the picture is stored off the UI thread
 };
 
 // Things the sidebar needs besides the connection.
@@ -48,5 +56,10 @@ void DrawUi(UiState& state, ConnectionManager& connection, Pipeline& pipeline, U
 // Sections in their own files.
 void DrawPresetSection(UiState& state, ConnectionManager& connection, UiServices& services);
 void DrawBackgroundSection(UiState& state, ConnectionManager& connection, UiServices& services);
+// Applies a picture added through the «+» tile once the dialog and the copy are done; every frame.
+void PollImagePicker(UiState& state, UiServices& services);
+
+// Keeps the zoomed area inside the frame.
+void ClampPan(proto::CameraSettings& camera);
 
 }  // namespace webicam::app

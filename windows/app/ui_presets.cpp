@@ -48,8 +48,6 @@ void Apply(const Preset& preset, UiState& state, ConnectionManager& connection, 
   if (configure) {
     connection.SetDesiredConfigure(*configure);
     state.chosenConfigure = *configure;
-    state.formatIndex = -1;
-    state.bitrateMbps = float(configure->bitrateKbps) / 1000.0f;
   } else {
     char text[128];
     std::snprintf(text, sizeof(text), "Формат %u×%u, %u к/с недоступен на этом iPhone", preset.configure.width,

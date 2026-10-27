@@ -89,12 +89,14 @@ void DrawPictures(UiState& state, ConnectionManager& connection, UiServices& ser
         ImGui::SetCursorScreenPos(after);
       }
     } else {
-      if (Tile("##add", nullptr, size, false, &p)) add = true;
-      if (ImGui::IsItemHovered()) ImGui::SetTooltip("Добавить картинку");
+      const bool busy = state.picker.Busy();
+      if (Tile("##add", nullptr, size, false, &p) && !busy) add = true;
+      if (ImGui::IsItemHovered()) ImGui::SetTooltip(busy ? "Выбор файла открыт" : "Добавить картинку");
+      const char* glyph = busy ? "…" : "+";
       ImGui::PushFont(theme::GetFonts().regular, theme::kTitleSize);
-      const ImVec2 ts = ImGui::CalcTextSize("+");
+      const ImVec2 ts = ImGui::CalcTextSize(glyph);
       ImGui::GetWindowDrawList()->AddText(ImVec2(p.x + (size.x - ts.x) / 2, p.y + (size.y - ts.y) / 2),
-                                          Col(theme::kMuted), "+");
+                                          Col(theme::kMuted), glyph);
       ImGui::PopFont();
     }
     ImGui::PopID();
@@ -108,17 +110,7 @@ void DrawPictures(UiState& state, ConnectionManager& connection, UiServices& ser
     Hint("Своя картинка");
   }
 
-  if (add) {
-    if (auto path = PickImageFile(services.window)) {
-      auto added = services.library.Add(*path);
-      if (added) {
-        state.backgroundError.clear();
-        SelectPicture(state, services, *added);
-      } else {
-        state.backgroundError = added.error();
-      }
-    }
-  }
+  if (add) state.picker.Open(services.window, services.library.Dir());
   if (remove) {
     std::vector<Preset> all = state.userPresets;
     auto removed = services.library.Remove(*remove, all);
@@ -195,9 +187,21 @@ void DrawReactions(const proto::CameraState& phone) {
 
 }  // namespace
 
+void PollImagePicker(UiState& state, UiServices& services) {
+  const auto outcome = state.picker.Take();
+  if (!outcome || !outcome->added) return;  // still open, or cancelled
+  if (*outcome->added) {
+    state.backgroundError.clear();
+    state.camera.backgroundMode = proto::BackgroundMode::Image;
+    SelectPicture(state, services, **outcome->added);
+  } else {
+    state.backgroundError = outcome->added->error();
+  }
+}
+
 void DrawBackgroundSection(UiState& state, ConnectionManager& connection, UiServices& services) {
   auto& c = state.camera;
-  Section("Фон");
+  Section("Что за спиной");
   static const char* kModes[proto::kBackgroundModeCount] = {"Выкл.", "Размытие", "Картинка", "Цвет"};
   const int mode = Segmented("bgmode", kModes, proto::kBackgroundModeCount, int(c.backgroundMode), 0xF);
   if (mode >= 0) {
