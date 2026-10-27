@@ -14,8 +14,8 @@ struct TestVector {
 // Expected values of shared/testvectors/*.bin. Mirrored in ios/WebicamCore tests.
 inline std::vector<TestVector> TestVectors() {
   return {
-      {"hello_pc.bin", Hello{4, "", {}}},
-      {"hello_phone.bin", Hello{4, "iPhone16,1", {{1280, 720, 60}, {1920, 1080, 60}, {1920, 1440, 60}, {3840, 2160, 30}}}},
+      {"hello_pc.bin", Hello{6, "", {}}},
+      {"hello_phone.bin", Hello{6, "iPhone16,1", {{1280, 720, 60}, {1920, 1080, 60}, {1920, 1440, 60}, {3840, 2160, 30}}}},
       {"configure_1080p60.bin", Configure{1920, 1080, 60, 25000}},
       {"video_frame_key.bin", VideoFrame{123456789, true, {0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0x00, 0x1F}}},
       {"request_keyframe.bin", RequestKeyframe{}},
@@ -30,6 +30,10 @@ inline std::vector<TestVector> TestVectors() {
                    -5.0f, 0.75f, true, true, false, true}},
       {"background_image.bin", BackgroundImage{{0xFF, 0xD8, 0xFF}}},
       {"background_image_empty.bin", BackgroundImage{}},
+      {"pair.bin", Pair{"482913"}},
+      {"telemetry.bin", Telemetry{87, Charging::Charging, 1}},
+      {"mic_settings.bin", MicSettings{true}},
+      {"audio_frame.bin", AudioFrame{1000, {0, 1, -1, 32767, -32768}}},
   };
 }
 

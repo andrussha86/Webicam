@@ -198,3 +198,133 @@ TEST(ConnectionManager, ReconnectsAfterClose) {
   stop = true;
   phone.join();
 }
+
+namespace {
+
+// A Wi-Fi phone: waits for the PC's Hello and Pair, then says Hello and sends Telemetry when the
+// code matches, or refuses the code and closes.
+class PairingPhone {
+ public:
+  explicit PairingPhone(std::string code) : code_(std::move(code)), listener_(*Socket::Listen("127.0.0.1", 0)) {
+    thread_ = std::thread([this] {
+      while (!stop_) {
+        Socket client = listener_.Accept(50);
+        if (!client.valid()) continue;
+        Serve(client);
+      }
+    });
+  }
+  ~PairingPhone() {
+    stop_ = true;
+    thread_.join();
+  }
+  uint16_t Port() const { return listener_.LocalPort(); }
+  std::string Address() const { return "127.0.0.1:" + std::to_string(Port()); }
+
+ private:
+  void Serve(Socket& client) {
+    proto::MessageParser parser;
+    std::vector<uint8_t> buffer(4096);
+    while (!stop_) {
+      const int n = client.Recv(buffer, 50);
+      if (n == -2) continue;
+      if (n <= 0) return;
+      parser.Feed(std::span(buffer.data(), size_t(n)));
+      proto::Message message;
+      while (parser.Next(message) == proto::MessageParser::Result::Message) {
+        const auto* pair = std::get_if<proto::Pair>(&message);
+        if (!pair) continue;
+        if (pair->code != code_) {
+          client.SendAll(proto::Encode(proto::Status{proto::StreamState::PairingRejected, 0, "Неверный код"}));
+          return;
+        }
+        client.SendAll(proto::Encode(proto::TestVectors()[1].message));
+        client.SendAll(proto::Encode(proto::Telemetry{64, proto::Charging::Unplugged, 1}));
+        while (!stop_ && client.Recv(buffer, 50) != 0) {
+        }
+        return;
+      }
+    }
+  }
+
+  std::string code_;
+  Socket listener_;
+  std::atomic<bool> stop_{false};
+  std::thread thread_;
+};
+
+}  // namespace
+
+TEST(ConnectionManager, WifiAsksForCodeThenStreams) {
+  PairingPhone phone("123456");
+  ConnectionManager manager({}, UnusedPort());
+  manager.SetLinkMode(LinkMode::Wifi);
+  manager.SetWifiAddress(phone.Address());
+  manager.Start();
+  ASSERT_TRUE(WaitFor([&] { return manager.State() == ConnState::WifiNeedsCode; }, 3000ms));
+  const auto request = manager.CodeRequest();
+  ASSERT_TRUE(request.has_value());
+  EXPECT_EQ(request->id, "addr:" + phone.Address());
+
+  manager.SetWifiCode(request->id, "123456");
+  ASSERT_TRUE(WaitFor([&] { return manager.State() == ConnState::Streaming; }, 3000ms));
+  EXPECT_EQ(manager.CurrentTransport(), Transport::Wifi);
+  ASSERT_TRUE(WaitFor([&] { return manager.PhoneTelemetry().has_value(); }, 2000ms));
+  EXPECT_EQ(manager.PhoneTelemetry()->battery, 64);
+  EXPECT_EQ(manager.WifiCodes().at(request->id), "123456");
+  manager.Stop();
+}
+
+TEST(ConnectionManager, WrongWifiCodeIsForgottenAndAskedAgain) {
+  PairingPhone phone("123456");
+  ConnectionManager manager({}, UnusedPort());
+  manager.SetLinkMode(LinkMode::Wifi);
+  manager.SetWifiAddress(phone.Address());
+  const std::string id = "addr:" + phone.Address();
+  manager.SetWifiCodes({{id, "000000"}});
+  manager.Start();
+  ASSERT_TRUE(WaitFor([&] { return manager.State() == ConnState::WifiNeedsCode; }, 3000ms));
+  EXPECT_NE(manager.Detail().find("Неверный код"), std::string::npos);
+  EXPECT_EQ(manager.WifiCodes().count(id), 0u);
+  // Stays asking instead of retrying with no code.
+  std::this_thread::sleep_for(2000ms);
+  EXPECT_EQ(manager.State(), ConnState::WifiNeedsCode);
+  manager.Stop();
+}
+
+TEST(ConnectionManager, UsbModeIgnoresWifiAddress) {
+  PairingPhone phone("123456");
+  ConnectionManager manager({}, UnusedPort());
+  manager.SetLinkMode(LinkMode::Usb);
+  manager.SetWifiAddress(phone.Address());
+  manager.Start();
+  EXPECT_TRUE(WaitFor([&] { return manager.State() == ConnState::AppleServiceMissing; }, 3000ms));
+  std::this_thread::sleep_for(500ms);
+  EXPECT_EQ(manager.State(), ConnState::AppleServiceMissing);
+  manager.Stop();
+}
+
+TEST(ConnectionManager, SendsMicSettingsAfterCameraAndOnChange) {
+  constexpr size_t kMicSettingsIndex = 12;
+  RecordingPhone phone;
+  ConnectionManager manager({});
+  manager.SetMicEnabled(true);
+  manager.SetDirect("127.0.0.1", phone.Port());
+  manager.Start();
+  ASSERT_TRUE(WaitFor([&] { return phone.Count(kMicSettingsIndex) >= 1; }, 5000ms));
+  // Pings may arrive at any point; the setup itself is Configure, CameraSettings, MicSettings.
+  const auto setup = [&] {
+    std::vector<proto::Message> out;
+    for (auto& m : phone.Messages()) {
+      if (!std::holds_alternative<proto::Ping>(m)) out.push_back(std::move(m));
+    }
+    return out;
+  };
+  auto messages = setup();
+  EXPECT_EQ(messages[messages.size() - 2].index(), kCameraSettingsIndex);
+  EXPECT_TRUE(std::get<proto::MicSettings>(messages.back()).enabled);
+  manager.SetMicEnabled(false);
+  ASSERT_TRUE(WaitFor([&] { return phone.Count(kMicSettingsIndex) >= 2; }, 2000ms));
+  EXPECT_FALSE(std::get<proto::MicSettings>(setup().back()).enabled);
+  manager.Stop();
+}

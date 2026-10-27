@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -15,6 +16,11 @@ struct StoredSettings {
   proto::CameraSettings camera;
   std::string backgroundImage = "builtin:0";  // "builtin:N" or a file in the backgrounds folder
   std::string preset;                         // name of the last applied preset
+  uint8_t linkMode = 0;                       // LinkMode: 0 auto, 1 USB only, 2 Wi-Fi only
+  std::string wifiAddress;                    // typed "host[:port]"; "" = none
+  std::map<std::string, std::string> wifiCodes;  // phone id -> code from its screen
+  bool micEnabled = false;
+  std::string audioDevice;  // playback endpoint id; "" = the virtual cable if installed
   bool operator==(const StoredSettings&) const = default;
 };
 

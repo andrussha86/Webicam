@@ -153,6 +153,24 @@ public struct MessageParser {
             return .cameraState(c)
         case .backgroundImage:
             return .backgroundImage(r.rest())
+        case .pair:
+            guard let code = r.str(), r.remaining == 0 else { return nil }
+            return .pair(code: code)
+        case .telemetry:
+            guard let battery = r.u8(), battery <= 100 || battery == 255, let rawCharging = r.u8(),
+                  let charging = Charging(rawValue: rawCharging), let thermal = r.u8(), thermal <= 3,
+                  r.remaining == 0
+            else { return nil }
+            return .telemetry(battery: battery, charging: charging, thermal: thermal)
+        case .micSettings:
+            guard let enabled = r.bool(), r.remaining == 0 else { return nil }
+            return .micSettings(enabled: enabled)
+        case .audioFrame:
+            guard let time = r.u64(), r.remaining % 2 == 0 else { return nil }
+            var samples: [Int16] = []
+            samples.reserveCapacity(r.remaining / 2)
+            while r.remaining > 0, let v = r.u16() { samples.append(Int16(bitPattern: v)) }
+            return .audioFrame(captureTimeUs: time, samples: samples)
         }
     }
 }

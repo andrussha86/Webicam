@@ -68,7 +68,7 @@ TEST(Protocol, ParserOversizeLengthIsError) {
 
 TEST(Protocol, ParserUnknownTypeIsError) {
   MessageParser parser;
-  parser.Feed(Header(0x0B, 0));
+  parser.Feed(Header(0x0F, 0));
   Message m;
   EXPECT_EQ(parser.Next(m), MessageParser::Result::Error);
 }
@@ -145,4 +145,36 @@ TEST(Protocol, RejectsRotationThree) {
 TEST(Protocol, RejectsColorHighByte) {
   const uint8_t color[4] = {0x00, 0x00, 0x00, 0x01};
   EXPECT_EQ(ParseSettingsWith(36, color), MessageParser::Result::Error);
+}
+
+TEST(Protocol, TelemetryRejectsOutOfRangeValues) {
+  const auto parse = [](std::vector<uint8_t> payload) {
+    auto bytes = Header(0x0C, uint32_t(payload.size()));
+    bytes.insert(bytes.end(), payload.begin(), payload.end());
+    MessageParser parser;
+    parser.Feed(bytes);
+    Message m;
+    return parser.Next(m);
+  };
+  EXPECT_EQ(parse({100, 3, 3}), MessageParser::Result::Message);
+  EXPECT_EQ(parse({255, 0, 0}), MessageParser::Result::Message);  // battery unknown
+  EXPECT_EQ(parse({101, 0, 0}), MessageParser::Result::Error);
+  EXPECT_EQ(parse({50, 4, 0}), MessageParser::Result::Error);
+  EXPECT_EQ(parse({50, 0, 4}), MessageParser::Result::Error);
+}
+
+TEST(Protocol, StatusAcceptsPairingRejected) {
+  const auto bytes = Encode(Status{StreamState::PairingRejected, 0, "код"});
+  auto parsed = Parse(bytes, bytes.size());
+  ASSERT_EQ(parsed.size(), 1u);
+  EXPECT_EQ(std::get<Status>(parsed[0]).state, StreamState::PairingRejected);
+}
+
+TEST(Protocol, AudioFrameRejectsOddPayload) {
+  auto bytes = Header(0x0E, 9);
+  bytes.insert(bytes.end(), 9, 0);
+  MessageParser parser;
+  parser.Feed(bytes);
+  Message m;
+  EXPECT_EQ(parser.Next(m), MessageParser::Result::Error);
 }

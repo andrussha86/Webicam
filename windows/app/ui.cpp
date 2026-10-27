@@ -46,54 +46,39 @@ void Label(const char* text) {
 
 // ---- Sidebar ---------------------------------------------------------------
 
-void DrawHeader(const UiState& state, ConnectionManager& connection) {
-  Text("Webicam", theme::GetFonts().semibold, theme::kTitleSize, theme::kText);
-  ImGui::Dummy(ImVec2(0, Px(2)));
-
-  // The dot is the connection state: steel when streaming, red when the user must fix something.
-  const ConnState conn = connection.State();
-  ImVec4 dot = theme::kFaint;
-  if (conn == ConnState::Streaming) dot = theme::kAccent;
-  if (conn == ConnState::AppleServiceMissing || conn == ConnState::VersionMismatch) dot = theme::kDanger;
-  ImGui::PushFont(nullptr, theme::kSmallSize + 1);
-  const ImVec2 p = ImGui::GetCursorScreenPos();
-  const float r = Px(3.5f);
-  ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(p.x + r, p.y + ImGui::GetFontSize() / 2 + Px(1)), r, Col(dot));
-  ImGui::SetCursorScreenPos(ImVec2(p.x + r * 2 + Px(8), p.y));
-  ImGui::PushStyleColor(ImGuiCol_Text, theme::kMuted);
-  ImGui::PushTextWrapPos(0.0f);
-  ImGui::TextUnformatted(connection.Detail().c_str());
-  ImGui::PopTextWrapPos();
-  ImGui::PopStyleColor();
-  ImGui::PopFont();
-
+// Messages that need attention, above everything else in the sidebar.
+void DrawCallouts(const UiState& state) {
   if (!state.cameraError.empty()) {
-    ImGui::Dummy(ImVec2(0, Px(4)));
     Callout(state.cameraError, theme::kDanger);
+    ImGui::Dummy(ImVec2(0, Px(8)));
   }
   if (!state.phoneStatus.empty()) {
-    ImGui::Dummy(ImVec2(0, Px(4)));
     Callout(state.phoneStatus, theme::kAccent);
-  }
-
-  if (conn == ConnState::ChooseDevice) {
-    Section("Выберите iPhone");
-    for (const auto& device : connection.Devices()) {
-      ImGui::PushID(int(device.deviceId));
-      if (ImGui::Selectable(device.serial.c_str(), false, 0, ImVec2(0, Px(32)))) {
-        connection.SelectDevice(device.deviceId);
-      }
-      if (ImGui::IsItemHovered()) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
-      ImGui::PopID();
-    }
+    ImGui::Dummy(ImVec2(0, Px(8)));
   }
 }
 
 void DrawTabs(UiState& state) {
   ImGui::Dummy(ImVec2(0, Px(12)));
-  static const char* kTabs[kTabCount] = {"Кадр", "Камера", "Фон"};
-  const int tab = Segmented("tabs", kTabs, kTabCount, int(state.tab), 0x7);
-  if (tab >= 0) state.tab = Tab(tab);
+  static const char* kTabs[kTabCount] = {"Связь", "Кадр", "Камера", "Фон", "Звук"};
+  const int tab = Segmented("tabs", kTabs, kTabCount, int(state.tab), 0x1F);
+  if (tab >= 0) {
+    state.tab = Tab(tab);
+    state.connectionTabAuto = false;
+  }
+}
+
+// The Connection tab opens when the user has to do something there, and closes again once the
+// stream starts if it was the app that opened it.
+void FollowConnection(UiState& state, ConnState conn) {
+  if (state.lastConnState == conn) return;
+  state.lastConnState = conn;
+  const bool needsUser = conn == ConnState::WifiNeedsCode || conn == ConnState::ChooseDevice;
+  if (needsUser && state.tab != Tab::Connection) {
+    state.tab = Tab::Connection;
+    state.connectionTabAuto = true;
+  }
+  if (conn == ConnState::Streaming && state.tab == Tab::Connection && state.connectionTabAuto) state.tab = Tab::Frame;
 }
 
 // Shape, size, frame rate and bitrate; every change goes to the phone at once.
@@ -407,7 +392,7 @@ void DrawPreview(UiState& state, ConnectionManager& connection, Pipeline& pipeli
     const bool streaming = connection.State() == ConnState::Streaming;
     const char* title = streaming ? "Ждём первый кадр" : "Нет видео";
     const char* hint = streaming ? "Изображение появится через пару секунд"
-                                 : "Подключите iPhone кабелем и откройте на нём Webicam";
+                                 : "Подключите iPhone кабелем или по Wi-Fi и откройте на нём Webicam";
     ImGui::PushFont(theme::GetFonts().medium, theme::kBodySize + 2);
     const ImVec2 ts = ImGui::CalcTextSize(title);
     const float cy = a.y + area.y / 2;
@@ -439,20 +424,30 @@ void DrawUi(UiState& state, ConnectionManager& connection, Pipeline& pipeline, U
                ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus |
                    ImGuiWindowFlags_NoScrollbar);
 
+  ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(ImGui::GetStyle().ItemSpacing.x, 0));
+  UpdateAudioOutput(state, connection, services);
+  DrawTopBar(state, connection, services);
+  ImGui::PopStyleVar();
+  FollowConnection(state, connection.State());
+
   const float sidebarW = Px(360);
+  const float bodyTop = ImGui::GetCursorScreenPos().y;
   ImGui::PushStyleColor(ImGuiCol_ChildBg, theme::kSurface);
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(Px(22), Px(20)));
   ImGui::BeginChild("controls", ImVec2(sidebarW, 0), ImGuiChildFlags_AlwaysUseWindowPadding);
   ImGui::PopStyleVar();
   ImGui::PopStyleColor();
   PollImagePicker(state, services);
-  DrawHeader(state, connection);
+  DrawCallouts(state);
   DrawPresetSection(state, connection, services);
   DrawTabs(state);
 
   const auto phone = connection.PhoneCamera();
   const proto::CameraState range = phone.value_or(FallbackCameraState());
   switch (state.tab) {
+    case Tab::Connection:
+      DrawConnectionSection(state, connection);
+      break;
     case Tab::Frame:
       DrawFormat(state, connection, pipeline);
       DrawLens(state, range, phone);
@@ -464,11 +459,14 @@ void DrawUi(UiState& state, ConnectionManager& connection, Pipeline& pipeline, U
     case Tab::Background:
       DrawBackgroundSection(state, connection, services);
       break;
+    case Tab::Sound:
+      DrawSoundSection(state, connection, services);
+      break;
   }
   ImGui::Dummy(ImVec2(0, Px(4)));
   ImGui::EndChild();
   const ImVec2 edge = ImGui::GetItemRectMax();
-  ImGui::GetWindowDrawList()->AddLine(ImVec2(edge.x, viewport->WorkPos.y), edge, Col(theme::kLine),
+  ImGui::GetWindowDrawList()->AddLine(ImVec2(edge.x, bodyTop), edge, Col(theme::kLine),
                                       std::max(1.0f, Px(1)));
 
   ImGui::SameLine(0, 0);

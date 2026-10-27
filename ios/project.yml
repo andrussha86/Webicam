@@ -17,10 +17,13 @@ targets:
       path: WebicamApp/Info.plist
       properties:
         CFBundleDisplayName: Webicam
-        CFBundleShortVersionString: "0.4.0"
-        CFBundleVersion: "5"
+        CFBundleShortVersionString: "0.5.0"
+        CFBundleVersion: "6"
         NSCameraReactionEffectGesturesEnabledDefault: true
         NSCameraUsageDescription: "Webicam передаёт видео с камеры на компьютер."
+        NSMicrophoneUsageDescription: "Webicam передаёт звук с микрофона на компьютер, когда вы включаете его там."
+        NSLocalNetworkUsageDescription: "Webicam передаёт видео на компьютер по Wi-Fi в вашей сети."
+        NSBonjourServices: [_webicam._tcp]
         UIAppFonts: [Geist-Regular.ttf, Geist-Medium.ttf, Geist-SemiBold.ttf, GeistMono-Medium.ttf]
         UILaunchScreen: {}
         UIRequiresFullScreen: true

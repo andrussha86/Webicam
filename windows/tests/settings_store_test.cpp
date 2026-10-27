@@ -66,3 +66,28 @@ TEST(SettingsStore, BadBackgroundModeIgnored) {
   EXPECT_EQ(s.camera.backgroundMode, proto::BackgroundMode::Off);
   EXPECT_EQ(s.camera.backgroundColor, proto::CameraSettings{}.backgroundColor);
 }
+
+TEST(SettingsStore, RoundTripWifi) {
+  StoredSettings s;
+  s.linkMode = 2;
+  s.wifiAddress = "192.168.1.20:47800";
+  s.wifiCodes = {{"5B7E0C1A-1111-2222-3333-444455556666", "482913"}, {"addr:192.168.1.20:47800", "000111"}};
+  EXPECT_EQ(ParseSettings(SerializeSettings(s)), s);
+}
+
+TEST(SettingsStore, WifiIdWithEqualsIsNotSaved) {
+  StoredSettings s;
+  s.wifiCodes = {{"name:a=b", "1"}, {"ok", "2"}};
+  const auto parsed = ParseSettings(SerializeSettings(s));
+  EXPECT_EQ(parsed.wifiCodes.size(), 1u);
+  EXPECT_EQ(parsed.wifiCodes.at("ok"), "2");
+}
+
+TEST(SettingsStore, BadLinkModeIgnored) { EXPECT_EQ(ParseSettings("link_mode=7\n").linkMode, 0); }
+
+TEST(SettingsStore, RoundTripMicrophone) {
+  StoredSettings s;
+  s.micEnabled = true;
+  s.audioDevice = "{0.0.0.00000000}.{f2a1c3d4-1111-2222-3333-444455556666}";
+  EXPECT_EQ(ParseSettings(SerializeSettings(s)), s);
+}

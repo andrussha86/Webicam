@@ -25,6 +25,10 @@ class DeviceSession {
     std::function<void(proto::VideoFrame&&)> onFrame;
     std::function<void(const proto::Status&)> onStatus;
     std::function<void(const proto::CameraState&)> onCameraState;
+    std::function<void(const proto::Telemetry&)> onTelemetry;
+    std::function<void(proto::AudioFrame&&)> onAudio;
+    // A Wi-Fi phone refused the code (before any Hello); onClosed follows.
+    std::function<void(const std::string& reason)> onPairingRejected;
     // Fires exactly once when the phone side closes or misbehaves; never from the destructor.
     // Must not destroy the session from inside the callback.
     std::function<void(std::string reason)> onClosed;
@@ -39,10 +43,12 @@ class DeviceSession {
   DeviceSession& operator=(const DeviceSession&) = delete;
   ~DeviceSession();
 
-  void Start();
+  // Sends Hello (and Pair right after it for a Wi-Fi phone), then starts reading.
+  void Start(std::optional<std::string> pairingCode = std::nullopt);
   void SendConfigure(const proto::Configure& configure);
   void SendCameraSettings(const proto::CameraSettings& settings);
   void SendBackgroundImage(std::vector<uint8_t> jpeg);
+  void SendMicSettings(const proto::MicSettings& settings);
   void RequestKeyframe();
   std::optional<int64_t> PhoneToPcUs(uint64_t phoneUs) const;
   bool Closed() const { return closed_.load(); }

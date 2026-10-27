@@ -24,6 +24,7 @@ inline constexpr ImVec4 kAccent = Rgb(0xA9BACB);
 inline constexpr ImVec4 kAccentHi = Rgb(0xC3D0DC);
 inline constexpr ImVec4 kOnAccent = Rgb(0x0F1012);
 inline constexpr ImVec4 kDanger = Rgb(0xD77272);
+inline constexpr ImVec4 kWarn = Rgb(0xD9A85E);  // phone getting hot, battery low
 
 // Unscaled font sizes; ImGui multiplies them by the DPI scale.
 inline constexpr float kBodySize = 15.0f;

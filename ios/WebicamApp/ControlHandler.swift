@@ -1,11 +1,20 @@
 import Foundation
 import Observation
+import UIKit
 import WebicamCore
 
 /// What the status screen shows.
 @Observable
 final class AppModel {
     var connected = false
+    /// How the PC is connected; nil while waiting.
+    var link: PhoneLink?
+    /// What the PC asks for when it connects over Wi-Fi.
+    var pairingCode = ""
+    /// The phone cannot be found on the network (no local network permission).
+    var wifiUnavailable = false
+    /// The microphone is being sent to the PC.
+    var micActive = false
     var stopped = false
     var format = "—"
     var bitrate = "—"
@@ -20,20 +29,33 @@ final class ControlHandler {
 
     private let capture = CaptureEngine()
     private let encoder = Encoder()
-    private let server = StreamServer()
+    private let server: StreamServer
+    private let mic = MicCapture()
     private var active: (width: Int, height: Int, fps: Int, bitrateKbps: Int)?
     private var throttled = false
     private var stopped = false  // logic copy of model.stopped, safe off the main thread
     private let stateTimer = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "webicam.camera-state"))
+    private var telemetryTimer: Timer?
 
     init() {
+        let code = Self.storedPairingCode()
+        server = StreamServer(phoneId: Self.phoneId(), pairingCode: code)
+        model.pairingCode = code
         capture.onFrame = { [encoder] pixelBuffer, time in encoder.encode(pixelBuffer, time: time) }
         encoder.onEncoded = { [server] annexB, keyframe, captureUs in
             server.sendVideo(.videoFrame(captureTimeUs: captureUs, keyframe: keyframe, annexB: annexB),
                              keyframe: keyframe)
         }
         server.onFrameDropped = { [encoder] in encoder.forceKeyframe() }
-        server.onConnectionChange = { [weak self] connected in self?.connectionChanged(connected) }
+        mic.onChunk = { [server] samples, captureUs in
+            server.sendAudio(.audioFrame(captureTimeUs: captureUs, samples: samples))
+        }
+        mic.onRunningChange = { [weak self] running in self?.updateModel { $0.micActive = running } }
+        mic.onError = { [weak self] text in
+            guard let self else { return }
+            self.server.send(.status(state: .error, thermal: self.thermalLevel(), message: text))
+        }
+        server.onConnectionChange = { [weak self] link in self?.connectionChanged(link) }
         server.onMessage = { [weak self] message in self?.handle(message) }
         capture.onBackgroundError = { [weak self] in
             guard let self else { return }
@@ -54,6 +76,7 @@ final class ControlHandler {
             let text = error.map { "Не удалось открыть порт: \($0.localizedDescription)" }
             self?.updateModel { $0.listenError = text }
         }
+        server.onWifiUnavailable = { [weak self] in self?.updateModel { $0.wifiUnavailable = true } }
         server.start()
     }
 
@@ -72,14 +95,58 @@ final class ControlHandler {
         }
     }
 
-    private func connectionChanged(_ connected: Bool) {
-        updateModel { $0.connected = connected }
-        if connected {
+    /// A new six-digit code; PCs that knew the old one have to be told the new one.
+    func regeneratePairingCode() {
+        let code = Self.newPairingCode()
+        UserDefaults.standard.set(code, forKey: Self.pairingCodeKey)
+        server.setPairingCode(code)
+        updateModel { $0.pairingCode = code }
+    }
+
+    private func connectionChanged(_ link: PhoneLink?) {
+        updateModel {
+            $0.connected = link != nil
+            $0.link = link
+        }
+        if link != nil {
             server.send(.hello(version: ProtocolConstants.version, model: Self.machineModel(),
                                formats: capture.supportedFormats))
+            DispatchQueue.main.async { [weak self] in self?.startTelemetry() }
         } else {
             capture.stop()
+            mic.setEnabled(false)
+            DispatchQueue.main.async { [weak self] in self?.stopTelemetry() }
         }
+    }
+
+    // MARK: Telemetry (main thread: UIDevice)
+
+    private func startTelemetry() {
+        UIDevice.current.isBatteryMonitoringEnabled = true
+        sendTelemetry()
+        telemetryTimer?.invalidate()
+        telemetryTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            self?.sendTelemetry()
+        }
+    }
+
+    private func stopTelemetry() {
+        telemetryTimer?.invalidate()
+        telemetryTimer = nil
+    }
+
+    private func sendTelemetry() {
+        let device = UIDevice.current
+        let level = device.batteryLevel
+        let battery: UInt8 = level < 0 ? 255 : UInt8((level * 100).rounded())
+        let charging: Charging
+        switch device.batteryState {
+        case .unplugged: charging = .unplugged
+        case .charging: charging = .charging
+        case .full: charging = .full
+        default: charging = .unknown
+        }
+        server.send(.telemetry(battery: battery, charging: charging, thermal: thermalLevel()))
     }
 
     private func handle(_ message: Message) {
@@ -100,6 +167,8 @@ final class ControlHandler {
             server.send(.pong(pcTimeUs: pcTimeUs, phoneTimeUs: hostTimeUs()))
         case let .backgroundImage(jpeg):
             capture.setBackgroundImage(jpeg)
+        case let .micSettings(enabled):
+            mic.setEnabled(enabled)
         default:
             break
         }
@@ -166,6 +235,28 @@ final class ControlHandler {
 
     private func updateModel(_ change: @escaping (AppModel) -> Void) {
         DispatchQueue.main.async { [model] in change(model) }
+    }
+
+    private static let pairingCodeKey = "webicam.pairingCode"
+
+    private static func storedPairingCode() -> String {
+        if let code = UserDefaults.standard.string(forKey: pairingCodeKey), code.count == 6 { return code }
+        let code = newPairingCode()
+        UserDefaults.standard.set(code, forKey: pairingCodeKey)
+        return code
+    }
+
+    private static func newPairingCode() -> String {
+        String(format: "%06d", Int.random(in: 0...999_999))
+    }
+
+    /// Lets the PC recognise this phone (and its code) when its Wi-Fi address changes.
+    private static func phoneId() -> String {
+        let key = "webicam.phoneId"
+        if let id = UserDefaults.standard.string(forKey: key) { return id }
+        let id = UUID().uuidString
+        UserDefaults.standard.set(id, forKey: key)
+        return id
     }
 
     private static func machineModel() -> String {

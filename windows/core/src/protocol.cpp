@@ -129,7 +129,7 @@ std::optional<Message> DecodePayload(MsgType type, std::span<const uint8_t> payl
       auto state = r.U8();
       auto thermal = r.U8();
       auto message = r.Str();
-      if (!state || !thermal || !message || r.Remaining() != 0 || *state > 3) return std::nullopt;
+      if (!state || !thermal || !message || r.Remaining() != 0 || *state > 4) return std::nullopt;
       return Status{StreamState(*state), *thermal, *message};
     }
     case MsgType::CameraSettings: {
@@ -196,6 +196,33 @@ std::optional<Message> DecodePayload(MsgType type, std::span<const uint8_t> payl
     }
     case MsgType::BackgroundImage:
       return BackgroundImage{r.Rest()};
+    case MsgType::Pair: {
+      auto code = r.Str();
+      if (!code || r.Remaining() != 0) return std::nullopt;
+      return Pair{*code};
+    }
+    case MsgType::Telemetry: {
+      auto battery = r.U8();
+      auto charging = r.U8();
+      auto thermal = r.U8();
+      if (!battery || !charging || !thermal || r.Remaining() != 0 || (*battery > 100 && *battery != kBatteryUnknown) ||
+          *charging > 3 || *thermal > 3) {
+        return std::nullopt;
+      }
+      return Telemetry{*battery, Charging(*charging), *thermal};
+    }
+    case MsgType::MicSettings: {
+      auto enabled = r.Bool();
+      if (!enabled || r.Remaining() != 0) return std::nullopt;
+      return MicSettings{*enabled};
+    }
+    case MsgType::AudioFrame: {
+      auto time = r.U64();
+      if (!time || r.Remaining() % 2 != 0) return std::nullopt;
+      AudioFrame frame{*time, std::vector<int16_t>(r.Remaining() / 2)};
+      for (auto& sample : frame.samples) sample = int16_t(*r.U16());
+      return frame;
+    }
   }
   return std::nullopt;
 }
@@ -291,6 +318,21 @@ std::vector<uint8_t> Encode(const Message& message) {
         } else if constexpr (std::is_same_v<T, BackgroundImage>) {
           type = MsgType::BackgroundImage;
           payload.Bytes(m.jpeg);
+        } else if constexpr (std::is_same_v<T, Pair>) {
+          type = MsgType::Pair;
+          payload.Str(m.code);
+        } else if constexpr (std::is_same_v<T, Telemetry>) {
+          type = MsgType::Telemetry;
+          payload.U8(m.battery);
+          payload.U8(uint8_t(m.charging));
+          payload.U8(m.thermal);
+        } else if constexpr (std::is_same_v<T, MicSettings>) {
+          type = MsgType::MicSettings;
+          payload.Bool(m.enabled);
+        } else if constexpr (std::is_same_v<T, AudioFrame>) {
+          type = MsgType::AudioFrame;
+          payload.U64(m.captureTimeUs);
+          for (int16_t sample : m.samples) payload.U16(uint16_t(sample));
         }
       },
       message);
@@ -316,7 +358,7 @@ MessageParser::Result MessageParser::Next(Message& out) {
   const uint8_t* head = buffer_.data() + offset_;
   const uint8_t type = head[0];
   const uint32_t length = uint32_t(head[1]) | uint32_t(head[2]) << 8 | uint32_t(head[3]) << 16 | uint32_t(head[4]) << 24;
-  if (type < uint8_t(MsgType::Hello) || type > uint8_t(MsgType::BackgroundImage) || length > kMaxPayloadBytes) {
+  if (type < uint8_t(MsgType::Hello) || type > uint8_t(MsgType::AudioFrame) || length > kMaxPayloadBytes) {
     failed_ = true;
     return Result::Error;
   }

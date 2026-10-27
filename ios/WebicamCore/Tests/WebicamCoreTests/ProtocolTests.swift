@@ -3,8 +3,8 @@ import XCTest
 
 /// Expected values of shared/testvectors/*.bin (mirrors windows/core/include/webicam/testvectors.h).
 private let vectors: [(String, Message)] = [
-    ("hello_pc.bin", .hello(version: 4, model: nil, formats: [])),
-    ("hello_phone.bin", .hello(version: 4, model: "iPhone16,1", formats: [
+    ("hello_pc.bin", .hello(version: 6, model: nil, formats: [])),
+    ("hello_phone.bin", .hello(version: 6, model: "iPhone16,1", formats: [
         CaptureFormat(width: 1280, height: 720, maxFps: 60),
         CaptureFormat(width: 1920, height: 1080, maxFps: 60),
         CaptureFormat(width: 1920, height: 1440, maxFps: 60),
@@ -64,6 +64,10 @@ private let vectors: [(String, Message)] = [
     }())),
     ("background_image.bin", .backgroundImage(Data([0xFF, 0xD8, 0xFF]))),
     ("background_image_empty.bin", .backgroundImage(Data())),
+    ("pair.bin", .pair(code: "482913")),
+    ("telemetry.bin", .telemetry(battery: 87, charging: .charging, thermal: 1)),
+    ("mic_settings.bin", .micSettings(enabled: true)),
+    ("audio_frame.bin", .audioFrame(captureTimeUs: 1000, samples: [0, 1, -1, 32767, -32768])),
 ]
 
 private let vectorsDir: URL = {
@@ -103,9 +107,17 @@ final class ProtocolTests: XCTestCase {
         XCTAssertThrowsError(try parser.next())
     }
 
+    func testTelemetryRejectsOutOfRange() {
+        for payload: [UInt8] in [[101, 0, 0], [50, 4, 0], [50, 0, 4]] {
+            var parser = MessageParser()
+            parser.feed(Data([0x0C, 3, 0, 0, 0] + payload))
+            XCTAssertThrowsError(try parser.next(), "\(payload)")
+        }
+    }
+
     func testUnknownTypeThrows() {
         var parser = MessageParser()
-        parser.feed(Data([0x0B, 0, 0, 0, 0]))
+        parser.feed(Data([0x0F, 0, 0, 0, 0]))
         XCTAssertThrowsError(try parser.next())
     }
 

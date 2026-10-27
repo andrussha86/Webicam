@@ -1,10 +1,11 @@
 import Foundation
 
-/// Webicam wire protocol v4 — see shared/protocol.md.
+/// Webicam wire protocol v6 — see shared/protocol.md.
 public enum ProtocolConstants {
-    public static let version: UInt16 = 4
+    public static let version: UInt16 = 6
     public static let phonePort: UInt16 = 47800
     public static let maxPayloadBytes = 16 * 1024 * 1024
+    public static let audioSampleRate = 48000
 }
 
 public struct CaptureFormat: Equatable, Hashable {
@@ -24,6 +25,12 @@ public enum StreamState: UInt8 {
     case stoppedByUser = 1
     case thermalThrottled = 2
     case error = 3
+    /// A Wi-Fi peer sent no Pair or the wrong code; the connection is closed next.
+    case pairingRejected = 4
+}
+
+public enum Charging: UInt8 {
+    case unknown = 0, unplugged, charging, full
 }
 
 public enum Lens: UInt8, CaseIterable {
@@ -92,7 +99,8 @@ public struct CameraState: Equatable {
 }
 
 enum MessageType: UInt8 {
-    case hello = 1, configure, videoFrame, requestKeyframe, ping, pong, status, cameraSettings, cameraState, backgroundImage
+    case hello = 1, configure, videoFrame, requestKeyframe, ping, pong, status, cameraSettings, cameraState, backgroundImage,
+         pair, telemetry, micSettings, audioFrame
 }
 
 public enum Message: Equatable {
@@ -108,6 +116,14 @@ public enum Message: Equatable {
     case cameraState(CameraState)
     /// JPEG for BackgroundMode.image; empty = no picture.
     case backgroundImage(Data)
+    /// Wi-Fi only: the code shown on the phone, sent by the PC right after Hello.
+    case pair(code: String)
+    /// battery: percent 0...100 or 255 when unknown; thermal as in status.
+    case telemetry(battery: UInt8, charging: Charging, thermal: UInt8)
+    /// Whether the phone should send its microphone.
+    case micSettings(enabled: Bool)
+    /// Mono signed 16-bit samples at ProtocolConstants.audioSampleRate.
+    case audioFrame(captureTimeUs: UInt64, samples: [Int16])
 
     public func encoded() -> Data {
         var payload = ByteWriter()
@@ -196,6 +212,22 @@ public enum Message: Equatable {
         case let .backgroundImage(jpeg):
             type = .backgroundImage
             payload.bytes.append(contentsOf: jpeg)
+        case let .pair(code):
+            type = .pair
+            payload.str(code)
+        case let .telemetry(battery, charging, thermal):
+            type = .telemetry
+            payload.u8(battery)
+            payload.u8(charging.rawValue)
+            payload.u8(thermal)
+        case let .micSettings(enabled):
+            type = .micSettings
+            payload.bool(enabled)
+        case let .audioFrame(captureTimeUs, samples):
+            type = .audioFrame
+            payload.u64(captureTimeUs)
+            payload.bytes.reserveCapacity(payload.bytes.count + samples.count * 2)
+            for sample in samples { payload.u16(UInt16(bitPattern: sample)) }
         }
         var frame = ByteWriter()
         frame.u8(type.rawValue)

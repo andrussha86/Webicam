@@ -10,6 +10,7 @@
 
 #include "file_dialog.h"
 #include "thumbnails.h"
+#include "webicam/audio_output.h"
 #include "webicam/background_library.h"
 #include "webicam/connection_manager.h"
 #include "webicam/pipeline.h"
@@ -17,13 +18,24 @@
 
 namespace webicam::app {
 
-// Sidebar tabs: what the picture is (format, lens, zoom, orientation), how the camera exposes it,
-// what is behind the person.
-enum class Tab { Frame = 0, Camera = 1, Background = 2 };
-inline constexpr int kTabCount = 3;
+// Sidebar tabs: how the phone is reached, what the picture is (format, lens, zoom, orientation),
+// how the camera exposes it, what is behind the person, where the phone's microphone goes.
+enum class Tab { Connection = 0, Frame = 1, Camera = 2, Background = 3, Sound = 4 };
+inline constexpr int kTabCount = 5;
 
 struct UiState {
-  Tab tab = Tab::Frame;
+  Tab tab = Tab::Connection;
+  // The Connection tab was opened by the app (not the user) and closes itself once streaming starts.
+  bool connectionTabAuto = true;
+  std::optional<ConnState> lastConnState;
+  char codeInput[8] = "";      // code from the phone's screen, digits only
+  std::string codeInputFor;    // phone id the field was filled for
+  char addressInput[96] = "";  // typed Wi-Fi address being edited
+  std::string wifiAddress;     // last applied typed address (from settings at start)
+  bool addressShown = false;   // «Не находит iPhone?» opened
+  std::string audioDevice;     // chosen playback endpoint; "" = the virtual cable, if installed
+  std::vector<AudioDevice> audioDevices;
+  uint64_t audioScanMs = 0;    // when audioDevices was last read
   float bitrateMbps = 0;
   bool bitrateDragging = false;
   std::string cameraError;  // virtual camera registration problem, if any
@@ -48,12 +60,22 @@ struct UiServices {
   ThumbnailCache& thumbnails;
   // Records the picture the phone should get and resends it if it is on screen.
   std::function<void(const std::string& ref)> setBackground;
+  AudioOutput& audio;
 };
 
 // Draws the whole window with Dear ImGui.
 void DrawUi(UiState& state, ConnectionManager& connection, Pipeline& pipeline, UiServices& services);
 
 // Sections in their own files.
+// Full-width bar above the sidebar and preview: name, link status, the phone's link, battery and heat.
+void DrawTopBar(UiState& state, ConnectionManager& connection, UiServices& services);
+void DrawConnectionSection(UiState& state, ConnectionManager& connection);
+void DrawSoundSection(UiState& state, ConnectionManager& connection, UiServices& services);
+// Rescans playback devices now and then and points the player at the chosen one (none while the
+// microphone is off); every frame.
+void UpdateAudioOutput(UiState& state, ConnectionManager& connection, UiServices& services);
+// The device the phone's sound goes to: the chosen one, or the virtual cable; "" when there is none.
+std::string EffectiveAudioDevice(const UiState& state);
 void DrawPresetSection(UiState& state, ConnectionManager& connection, UiServices& services);
 void DrawBackgroundSection(UiState& state, ConnectionManager& connection, UiServices& services);
 // Applies a picture added through the «+» tile once the dialog and the copy are done; every frame.

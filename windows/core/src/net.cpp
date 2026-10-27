@@ -28,7 +28,16 @@ sockaddr_in Address(const char* host, uint16_t port) {
   sockaddr_in addr{};
   addr.sin_family = AF_INET;
   addr.sin_port = htons(port);
-  inet_pton(AF_INET, host, &addr.sin_addr);
+  if (inet_pton(AF_INET, host, &addr.sin_addr) == 1) return addr;
+  // A name such as "iPhone.local": Windows resolves .local names over mDNS too.
+  addrinfo hints{};
+  hints.ai_family = AF_INET;
+  hints.ai_socktype = SOCK_STREAM;
+  addrinfo* found = nullptr;
+  if (getaddrinfo(host, nullptr, &hints, &found) == 0 && found) {
+    addr.sin_addr = reinterpret_cast<const sockaddr_in*>(found->ai_addr)->sin_addr;
+    freeaddrinfo(found);
+  }
   return addr;
 }
 

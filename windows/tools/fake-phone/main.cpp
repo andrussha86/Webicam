@@ -4,6 +4,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <mutex>
 #include <string>
@@ -67,6 +68,36 @@ void Serve(Socket client, const Options& options) {
     stop = true;
   });
 
+  // Battery slowly draining while plugged in, so the PC's top bar has something to show.
+  std::thread telemetry([&] {
+    uint8_t battery = 87;
+    while (!stop) {
+      send(proto::Telemetry{battery, proto::Charging::Charging, 1});
+      for (int i = 0; i < 20 && !stop; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      battery = battery > 5 ? uint8_t(battery - 1) : uint8_t(100);
+    }
+  });
+
+  // A quiet 440 Hz tone in 20 ms chunks while the PC wants the microphone.
+  std::atomic<bool> mic{false};
+  std::thread microphone([&] {
+    constexpr size_t kChunk = proto::kAudioSampleRate / 50;
+    double phase = 0;
+    auto next = std::chrono::steady_clock::now();
+    while (!stop) {
+      next += std::chrono::milliseconds(20);
+      if (mic) {
+        proto::AudioFrame frame{NowUs(), std::vector<int16_t>(kChunk)};
+        for (auto& sample : frame.samples) {
+          sample = int16_t(3000 * std::sin(phase));
+          phase += 2 * 3.14159265358979 * 440 / proto::kAudioSampleRate;
+        }
+        send(frame);
+      }
+      std::this_thread::sleep_until(next);
+    }
+  });
+
   proto::MessageParser parser;
   std::array<uint8_t, 4096> buffer{};
   while (!stop) {
@@ -79,6 +110,9 @@ void Serve(Socket client, const Options& options) {
       if (auto* c = std::get_if<proto::Configure>(&m)) {
         std::lock_guard lock(configMutex);
         config = *c;
+      } else if (auto* settings = std::get_if<proto::MicSettings>(&m)) {
+        mic = settings->enabled;
+        std::printf("microphone %s\n", settings->enabled ? "on" : "off");
       } else if (std::holds_alternative<proto::RequestKeyframe>(m)) {
         keyframe = true;
       } else if (auto* p = std::get_if<proto::Ping>(&m)) {
@@ -95,6 +129,8 @@ void Serve(Socket client, const Options& options) {
   }
   stop = true;
   streamer.join();
+  telemetry.join();
+  microphone.join();
   std::printf("client disconnected\n");
 }
 

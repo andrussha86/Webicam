@@ -9,12 +9,13 @@
 
 namespace webicam::proto {
 
-inline constexpr uint16_t kProtocolVersion = 4;
+inline constexpr uint16_t kProtocolVersion = 6;
 inline constexpr uint16_t kPhonePort = 47800;
 inline constexpr uint32_t kMaxPayloadBytes = 16u * 1024 * 1024;
 
 enum class MsgType : uint8_t {
-  Hello = 1, Configure, VideoFrame, RequestKeyframe, Ping, Pong, Status, CameraSettings, CameraState, BackgroundImage
+  Hello = 1, Configure, VideoFrame, RequestKeyframe, Ping, Pong, Status, CameraSettings, CameraState, BackgroundImage,
+  Pair, Telemetry, MicSettings, AudioFrame
 };
 
 struct CaptureFormat {
@@ -62,7 +63,8 @@ struct Pong {
   bool operator==(const Pong&) const = default;
 };
 
-enum class StreamState : uint8_t { Streaming = 0, StoppedByUser = 1, ThermalThrottled = 2, Error = 3 };
+// PairingRejected: a Wi-Fi connection sent no Pair or the wrong code; the phone closes it next.
+enum class StreamState : uint8_t { Streaming = 0, StoppedByUser = 1, ThermalThrottled = 2, Error = 3, PairingRejected = 4 };
 
 // thermal: 0 nominal, 1 fair, 2 serious, 3 critical.
 struct Status {
@@ -135,8 +137,40 @@ struct BackgroundImage {
   bool operator==(const BackgroundImage&) const = default;
 };
 
+// Wi-Fi only: the code the phone shows on its screen, sent right after Hello.
+struct Pair {
+  std::string code;
+  bool operator==(const Pair&) const = default;
+};
+
+enum class Charging : uint8_t { Unknown = 0, Unplugged = 1, Charging = 2, Full = 3 };
+inline constexpr uint8_t kBatteryUnknown = 255;
+
+// The phone's power and heat, every 2 s.
+struct Telemetry {
+  uint8_t battery = kBatteryUnknown;  // percent, 0…100, or kBatteryUnknown
+  Charging charging = Charging::Unknown;
+  uint8_t thermal = 0;  // 0 nominal, 1 fair, 2 serious, 3 critical
+  bool operator==(const Telemetry&) const = default;
+};
+
+// Whether the phone should send its microphone; a full snapshot like CameraSettings.
+struct MicSettings {
+  bool enabled = false;
+  bool operator==(const MicSettings&) const = default;
+};
+
+inline constexpr uint32_t kAudioSampleRate = 48000;
+
+// Microphone samples: mono, signed 16-bit, kAudioSampleRate.
+struct AudioFrame {
+  uint64_t captureTimeUs;
+  std::vector<int16_t> samples;
+  bool operator==(const AudioFrame&) const = default;
+};
+
 using Message = std::variant<Hello, Configure, VideoFrame, RequestKeyframe, Ping, Pong, Status, CameraSettings,
-                             CameraState, BackgroundImage>;
+                             CameraState, BackgroundImage, Pair, Telemetry, MicSettings, AudioFrame>;
 
 std::vector<uint8_t> Encode(const Message& message);
 

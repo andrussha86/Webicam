@@ -18,6 +18,7 @@
 #include "resource.h"
 #include "theme.h"
 #include "ui.h"
+#include "webicam/audio_output.h"
 #include "webicam/background_library.h"
 #include "webicam/connection_manager.h"
 #include "webicam/image_codec.h"
@@ -227,6 +228,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
       [&](uint64_t phoneUs) { return connectionPtr->PhoneToPcUs(phoneUs); });
   if (!pipeline.Ready()) ui.cameraError = "Нет аппаратного декодера H.264 (D3D11).";
 
+  AudioOutput audio;
   std::mutex statusMutex;
   std::string phoneStatus;
   // Frames still arriving well after "stopped by user" mean the phone resumed without
@@ -246,6 +248,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
       .onConnectionChanged =
           [&](bool connected) {
             pipeline.OnConnectionChanged(connected);
+            audio.Reset();
             if (!connected) {
               std::lock_guard lock(statusMutex);
               phoneStatus.clear();
@@ -264,8 +267,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
                 phoneStatus = "iPhone перегревается: качество снижено";
                 break;
               case proto::StreamState::Error: phoneStatus = "Ошибка на iPhone: " + status.message; break;
+              case proto::StreamState::PairingRejected: break;  // the Connection tab asks for the code
             }
           },
+      .onAudio = [&](proto::AudioFrame&& frame) { audio.Push(frame.samples); },
   });
   connectionPtr = connection.get();
   if (direct) connection->SetDirect(direct->first, direct->second);
@@ -292,20 +297,28 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     backgroundJpeg = jpeg;
     return jpeg;
   });
-  app::UiServices services{g_app.hwnd, library, thumbnails, [&](const std::string& ref) {
+  app::UiServices services{g_app.hwnd, library, thumbnails,
+                           [&](const std::string& ref) {
                              {
                                std::lock_guard lock(backgroundMutex);
                                if (backgroundRef == ref) return;
                                backgroundRef = ref;
                              }
                              connection->InvalidateBackground();
-                           }};
+                           },
+                           audio};
 
   const auto settingsPath = DefaultSettingsPath();
   StoredSettings saved = LoadSettings(settingsPath);
   if (saved.configure) connection->SetDesiredConfigure(*saved.configure);
   backgroundRef = saved.backgroundImage;
   connection->SetDesiredCamera(saved.camera);
+  connection->SetLinkMode(LinkMode(saved.linkMode));
+  connection->SetWifiAddress(saved.wifiAddress);
+  connection->SetWifiCodes(saved.wifiCodes);
+  ui.wifiAddress = saved.wifiAddress;
+  connection->SetMicEnabled(saved.micEnabled);
+  ui.audioDevice = saved.audioDevice;
   ui.chosenConfigure = saved.configure;
   ui.camera = saved.camera;
   ui.backgroundImage = saved.backgroundImage;
@@ -313,7 +326,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
   ui.userPresets = LoadPresets(DefaultPresetsPath());
   uint64_t settingsChangedMs = 0;
   auto currentSettings = [&] {
-    return StoredSettings{ui.chosenConfigure, connection->DesiredCamera(), ui.backgroundImage, ui.activePreset};
+    return StoredSettings{ui.chosenConfigure,      connection->DesiredCamera(),      ui.backgroundImage,
+                          ui.activePreset,         uint8_t(connection->GetLinkMode()), connection->WifiAddress(),
+                          connection->WifiCodes(),  connection->MicEnabled(),         ui.audioDevice};
   };
   connection->Start();
 

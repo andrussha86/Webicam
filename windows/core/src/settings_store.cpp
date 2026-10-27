@@ -132,6 +132,15 @@ std::string SerializeSettings(const StoredSettings& s) {
   AppendCameraKeys(out, s.camera);
   out += "background_image=" + s.backgroundImage + "\n";
   if (!s.preset.empty()) out += "preset=" + s.preset + "\n";
+  out += "link_mode=" + std::to_string(unsigned(s.linkMode)) + "\n";
+  if (!s.wifiAddress.empty()) out += "wifi_address=" + s.wifiAddress + "\n";
+  for (const auto& [id, code] : s.wifiCodes) {
+    // A key cannot hold '=' or a line break; such an id is simply not remembered.
+    if (id.find_first_of("=\r\n") != std::string::npos || code.find_first_of("\r\n") != std::string::npos) continue;
+    out += "wifi_code." + id + "=" + code + "\n";
+  }
+  out += "mic_enabled=" + std::to_string(s.micEnabled) + "\n";
+  if (!s.audioDevice.empty()) out += "audio_device=" + s.audioDevice + "\n";
   return out;
 }
 
@@ -155,6 +164,17 @@ StoredSettings ParseSettings(std::string_view text) {
       s.backgroundImage = std::string(value);
     } else if (key == "preset") {
       s.preset = std::string(value);
+    } else if (key == "link_mode") {
+      unsigned mode = 0;
+      if (ParseNumber(value, mode) && mode <= 2) s.linkMode = uint8_t(mode);
+    } else if (key == "mic_enabled") {
+      ParseBool(value, s.micEnabled);
+    } else if (key == "audio_device") {
+      s.audioDevice = std::string(value);
+    } else if (key == "wifi_address") {
+      s.wifiAddress = std::string(value);
+    } else if (key.starts_with("wifi_code.") && key.size() > 10 && !value.empty()) {
+      s.wifiCodes[std::string(key.substr(10))] = std::string(value);
     }
   }
   ApplyLegacyBackground(s.camera, sawBackgroundMode);

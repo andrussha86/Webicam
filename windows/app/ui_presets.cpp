@@ -183,24 +183,27 @@ void DrawDeleteDialog(UiState& state) {
 void DrawPresetSection(UiState& state, ConnectionManager& connection, UiServices& services) {
   const Preset* active = FindPreset(state, state.activePreset);
 
-  // Title with «изменён» on the right when the current settings drifted from the preset.
-  SectionStart();
+  // Small label with «изменён» on the right when the current settings drifted from the preset.
   const float y = ImGui::GetCursorPosY();
   const float right = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
-  Text("Пресет", theme::GetFonts().medium, theme::kBodySize, theme::kText);
+  Text("Пресет", theme::GetFonts().regular, theme::kSmallSize, theme::kMuted);
   if (active && !PresetMatches(*active, connection.DesiredConfigure(), state.camera, state.backgroundImage)) {
     ImGui::PushFont(nullptr, theme::kSmallSize);
     const float w = ImGui::CalcTextSize("изменён").x;
     const float afterTitle = ImGui::GetCursorPosY();
-    ImGui::SetCursorPos(ImVec2(right - w, y + Px(2)));
+    ImGui::SetCursorPos(ImVec2(right - w, y));
     ImGui::PushStyleColor(ImGuiCol_Text, theme::kMuted);
     ImGui::TextUnformatted("изменён");
     ImGui::PopStyleColor();
     ImGui::PopFont();
     ImGui::SetCursorPosY(afterTitle);
   }
+  ImGui::SetCursorPosY(ImGui::GetCursorPosY() - Px(4));
 
-  ImGui::SetNextItemWidth(-FLT_MIN);
+  // One row: the list, then «⋯» with the rarer actions.
+  const float menuW = Px(36);
+  const float spacing = ImGui::GetStyle().ItemSpacing.x;
+  ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - menuW - spacing);
   const char* preview = active ? active->name.c_str() : "Не выбран";
   if (ImGui::BeginCombo("##preset", preview)) {
     const Preset* chosen = nullptr;
@@ -220,20 +223,32 @@ void DrawPresetSection(UiState& state, ConnectionManager& connection, UiServices
       active = FindPreset(state, state.activePreset);
     }
   }
+  ImGui::SameLine(0, spacing);
+  const ImVec2 p = ImGui::GetCursorScreenPos();
+  const float h = ImGui::GetFrameHeight();
+  if (ImGui::Button("##presetmenu", ImVec2(menuW, h))) ImGui::OpenPopup("##presetactions");
+  if (ImGui::IsItemHovered()) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+  ImGui::SetItemTooltip("Сохранить или удалить пресет");
+  for (int i = -1; i <= 1; ++i) {
+    ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(p.x + menuW / 2 + float(i) * Px(5), p.y + h / 2), Px(1.6f),
+                                                Col(theme::kText));
+  }
 
-  ImGui::Dummy(ImVec2(0, Px(2)));
-  const float half = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) / 2;
-  ImGui::BeginChild("##saveas", ImVec2(half, Px(36)), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
-  if (SecondaryButton("Сохранить как")) ImGui::OpenPopup("Новый пресет");
+  bool openSave = false;
+  bool openDelete = false;
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(Px(6), Px(6)));
+  if (ImGui::BeginPopup("##presetactions")) {
+    if (ImGui::Selectable("Сохранить как…", false, 0, ImVec2(Px(200), Px(28)))) openSave = true;
+    ImGui::BeginDisabled(!active || active->builtin);
+    if (ImGui::Selectable("Удалить", false, 0, ImVec2(Px(200), Px(28)))) openDelete = true;
+    ImGui::EndDisabled();
+    ImGui::EndPopup();
+  }
+  ImGui::PopStyleVar();
+  if (openSave) ImGui::OpenPopup("Новый пресет");
+  if (openDelete) ImGui::OpenPopup("Удалить пресет");
   DrawSaveDialog(state, connection);
-  ImGui::EndChild();
-  ImGui::SameLine();
-  ImGui::BeginChild("##remove", ImVec2(half, Px(36)), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
-  ImGui::BeginDisabled(!active || active->builtin);
-  if (SecondaryButton("Удалить")) ImGui::OpenPopup("Удалить пресет");
-  ImGui::EndDisabled();
   DrawDeleteDialog(state);
-  ImGui::EndChild();
 
   if (!state.presetHint.empty()) HintColored(state.presetHint.c_str(), state.presetHintIsError ? theme::kDanger : theme::kMuted);
 }

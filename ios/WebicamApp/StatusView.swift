@@ -59,6 +59,12 @@ struct StatusView: View {
                 Text(statusTitle)
                     .font(Theme.sans(15, .medium, relativeTo: .subheadline))
                     .foregroundStyle(model.connected ? Theme.text : Theme.muted)
+                if let link = model.link {
+                    tag(link == .usb ? "USB" : "Wi-Fi")
+                }
+                if model.micActive {
+                    tag("Микрофон")
+                }
             }
             .accessibilityElement(children: .combine)
 
@@ -74,10 +80,11 @@ struct StatusView: View {
                         .foregroundStyle(Theme.muted)
                 }
             } else {
-                Text("Подключите iPhone кабелем и запустите Webicam на компьютере")
+                Text("Подключите iPhone кабелем или выберите его в Webicam на компьютере по Wi-Fi")
                     .font(Theme.sans(26, .medium, relativeTo: .title))
                     .foregroundStyle(Theme.text)
                     .fixedSize(horizontal: false, vertical: true)
+                pairingCard
             }
 
             if let warning = model.listenError ?? model.warning {
@@ -92,6 +99,53 @@ struct StatusView: View {
                     .padding(.top, 6)
             }
         }
+    }
+
+    private func tag(_ text: String) -> some View {
+        Text(text)
+            .font(Theme.mono(12, relativeTo: .caption))
+            .foregroundStyle(Theme.muted)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(Theme.raised, in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    /// The code a PC asks for the first time it connects over Wi-Fi.
+    private var pairingCard: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Код для Wi-Fi")
+                .font(Theme.sans(13, relativeTo: .footnote))
+                .foregroundStyle(Theme.muted)
+            HStack(alignment: .firstTextBaseline) {
+                Text(spacedCode)
+                    .font(Theme.mono(34, relativeTo: .largeTitle))
+                    .foregroundStyle(Theme.text)
+                    .textSelection(.enabled)
+                    .accessibilityLabel("Код \(model.pairingCode.map(String.init).joined(separator: " "))")
+                Spacer()
+                Button("Новый код") { handler.regeneratePairingCode() }
+                    .font(Theme.sans(15, .medium, relativeTo: .subheadline))
+                    .foregroundStyle(Theme.accent)
+                    .frame(minHeight: 44)
+            }
+            Text(model.wifiUnavailable
+                 ? "Wi-Fi недоступен: разрешите Webicam доступ к локальной сети в Настройках и перезапустите приложение"
+                 : "Компьютер и iPhone должны быть в одной сети")
+                .font(Theme.sans(13, relativeTo: .footnote))
+                .foregroundStyle(model.wifiUnavailable ? Theme.text : Theme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.raised, in: RoundedRectangle(cornerRadius: 14))
+        .padding(.top, 10)
+    }
+
+    private var spacedCode: String {
+        let code = model.pairingCode
+        guard code.count == 6 else { return code }
+        return "\(code.prefix(3)) \(code.suffix(3))"
     }
 
     private var statusTitle: String {

@@ -27,8 +27,9 @@ DeviceSession::~DeviceSession() {
   if (thread_.joinable()) thread_.join();
 }
 
-void DeviceSession::Start() {
+void DeviceSession::Start(std::optional<std::string> pairingCode) {
   Send(proto::Hello{proto::kProtocolVersion, {}, {}});
+  if (pairingCode) Send(proto::Pair{std::move(*pairingCode)});
   thread_ = std::thread([this] { Run(); });
 }
 
@@ -37,6 +38,8 @@ void DeviceSession::SendConfigure(const proto::Configure& configure) { Send(conf
 void DeviceSession::SendCameraSettings(const proto::CameraSettings& settings) { Send(settings); }
 
 void DeviceSession::SendBackgroundImage(std::vector<uint8_t> jpeg) { Send(proto::BackgroundImage{std::move(jpeg)}); }
+
+void DeviceSession::SendMicSettings(const proto::MicSettings& settings) { Send(settings); }
 
 void DeviceSession::RequestKeyframe() { Send(proto::RequestKeyframe{}); }
 
@@ -90,6 +93,12 @@ void DeviceSession::Run() {
     proto::MessageParser::Result result;
     while ((result = parser.Next(message)) == proto::MessageParser::Result::Message) {
       if (!handshaken) {
+        const auto* status = std::get_if<proto::Status>(&message);
+        if (status && status->state == proto::StreamState::PairingRejected) {
+          if (events_.onPairingRejected) events_.onPairingRejected(status->message);
+          Close("телефон не принял код: " + status->message);
+          return;
+        }
         const auto* hello = std::get_if<proto::Hello>(&message);
         if (!hello) {
           Close("ошибка протокола: первым сообщением ожидался Hello");
@@ -115,6 +124,10 @@ void DeviceSession::Run() {
         if (events_.onStatus) events_.onStatus(*status);
       } else if (auto* camera = std::get_if<proto::CameraState>(&message)) {
         if (events_.onCameraState) events_.onCameraState(*camera);
+      } else if (auto* audio = std::get_if<proto::AudioFrame>(&message)) {
+        if (events_.onAudio) events_.onAudio(std::move(*audio));
+      } else if (auto* telemetry = std::get_if<proto::Telemetry>(&message)) {
+        if (events_.onTelemetry) events_.onTelemetry(*telemetry);
       }
     }
     if (result == proto::MessageParser::Result::Error) {
