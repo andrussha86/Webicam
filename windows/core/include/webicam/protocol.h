@@ -9,12 +9,12 @@
 
 namespace webicam::proto {
 
-inline constexpr uint16_t kProtocolVersion = 2;
+inline constexpr uint16_t kProtocolVersion = 3;
 inline constexpr uint16_t kPhonePort = 47800;
 inline constexpr uint32_t kMaxPayloadBytes = 16u * 1024 * 1024;
 
 enum class MsgType : uint8_t {
-  Hello = 1, Configure, VideoFrame, RequestKeyframe, Ping, Pong, Status, CameraSettings, CameraState
+  Hello = 1, Configure, VideoFrame, RequestKeyframe, Ping, Pong, Status, CameraSettings, CameraState, BackgroundImage
 };
 
 struct CaptureFormat {
@@ -75,6 +75,9 @@ struct Status {
 enum class Lens : uint8_t { UltraWide = 0, Wide = 1, Wide2x = 2, Telephoto = 3, Front = 4 };
 inline constexpr int kLensCount = 5;
 
+enum class BackgroundMode : uint8_t { Off = 0, Blur = 1, Image = 2, Color = 3 };
+inline constexpr int kBackgroundModeCount = 4;
+
 // Full snapshot of the PC's camera choices; the phone clamps every value to the active lens.
 struct CameraSettings {
   Lens lens = Lens::Wide;
@@ -90,6 +93,9 @@ struct CameraSettings {
   float lensPosition = 0.5f;  // 0 near … 1 far
   uint8_t blur = 0;           // 0 off … 100 strongest
   bool rotate180 = false;
+  bool faceFocus = false;  // face-driven focus/exposure while those are on auto
+  BackgroundMode backgroundMode = BackgroundMode::Off;
+  uint32_t backgroundColor = 0x1F2125;  // 0x00RRGGBB
   bool operator==(const CameraSettings&) const = default;
 };
 
@@ -107,11 +113,20 @@ struct CameraState {
   float temperatureK = 0;
   float tint = 0;
   float lensPosition = 0;
+  bool reactionsSupported = false;  // by the active format
+  bool reactionsEnabled = false;    // iOS Control Center, Video Effects
+  bool gesturesEnabled = false;
   bool operator==(const CameraState&) const = default;
 };
 
-using Message =
-    std::variant<Hello, Configure, VideoFrame, RequestKeyframe, Ping, Pong, Status, CameraSettings, CameraState>;
+// JPEG the phone puts behind the person in BackgroundMode::Image; empty = no picture.
+struct BackgroundImage {
+  std::vector<uint8_t> jpeg;
+  bool operator==(const BackgroundImage&) const = default;
+};
+
+using Message = std::variant<Hello, Configure, VideoFrame, RequestKeyframe, Ping, Pong, Status, CameraSettings,
+                             CameraState, BackgroundImage>;
 
 std::vector<uint8_t> Encode(const Message& message);
 

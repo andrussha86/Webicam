@@ -1,8 +1,8 @@
 import Foundation
 
-/// Webicam wire protocol v2 — see shared/protocol.md.
+/// Webicam wire protocol v3 — see shared/protocol.md.
 public enum ProtocolConstants {
-    public static let version: UInt16 = 2
+    public static let version: UInt16 = 3
     public static let phonePort: UInt16 = 47800
     public static let maxPayloadBytes = 16 * 1024 * 1024
 }
@@ -30,6 +30,10 @@ public enum Lens: UInt8, CaseIterable {
     case ultraWide = 0, wide, wide2x, telephoto, front
 }
 
+public enum BackgroundMode: UInt8 {
+    case off = 0, blur, image, color
+}
+
 /// Full snapshot of the PC's camera choices; the phone clamps every value to the active lens.
 public struct CameraSettings: Equatable {
     public var lens: Lens = .wide
@@ -45,6 +49,9 @@ public struct CameraSettings: Equatable {
     public var lensPosition: Float = 0.5  // 0 near ... 1 far
     public var blur: UInt8 = 0  // 0 off ... 100 strongest
     public var rotate180 = false
+    public var faceFocus = false  // face-driven focus/exposure while those are on auto
+    public var backgroundMode: BackgroundMode = .off
+    public var backgroundColor: UInt32 = 0x1F2125  // 0x00RRGGBB
 
     public init() {}
 }
@@ -66,12 +73,15 @@ public struct CameraState: Equatable {
     public var temperatureK: Float = 0
     public var tint: Float = 0
     public var lensPosition: Float = 0
+    public var reactionsSupported = false  // by the active format
+    public var reactionsEnabled = false  // Control Center, Video Effects
+    public var gesturesEnabled = false
 
     public init() {}
 }
 
 enum MessageType: UInt8 {
-    case hello = 1, configure, videoFrame, requestKeyframe, ping, pong, status, cameraSettings, cameraState
+    case hello = 1, configure, videoFrame, requestKeyframe, ping, pong, status, cameraSettings, cameraState, backgroundImage
 }
 
 public enum Message: Equatable {
@@ -85,6 +95,8 @@ public enum Message: Equatable {
     case status(state: StreamState, thermal: UInt8, message: String)
     case cameraSettings(CameraSettings)
     case cameraState(CameraState)
+    /// JPEG for BackgroundMode.image; empty = no picture.
+    case backgroundImage(Data)
 
     public func encoded() -> Data {
         var payload = ByteWriter()
@@ -142,6 +154,9 @@ public enum Message: Equatable {
             payload.f32(c.lensPosition)
             payload.u8(c.blur)
             payload.bool(c.rotate180)
+            payload.bool(c.faceFocus)
+            payload.u8(c.backgroundMode.rawValue)
+            payload.u32(c.backgroundColor)
         case let .cameraState(c):
             type = .cameraState
             payload.u8(c.lenses)
@@ -159,6 +174,12 @@ public enum Message: Equatable {
             payload.f32(c.temperatureK)
             payload.f32(c.tint)
             payload.f32(c.lensPosition)
+            payload.bool(c.reactionsSupported)
+            payload.bool(c.reactionsEnabled)
+            payload.bool(c.gesturesEnabled)
+        case let .backgroundImage(jpeg):
+            type = .backgroundImage
+            payload.bytes.append(contentsOf: jpeg)
         }
         var frame = ByteWriter()
         frame.u8(type.rawValue)

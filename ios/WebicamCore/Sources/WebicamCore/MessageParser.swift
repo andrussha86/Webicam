@@ -95,7 +95,9 @@ public struct MessageParser {
                   let manualExposure = r.bool(), let iso = r.f32(), let shutter = r.u32(), let bias = r.f32(),
                   let manualWb = r.bool(), let temperature = r.f32(), let tint = r.f32(),
                   let manualFocus = r.bool(), let lensPosition = r.f32(), let blur = r.u8(),
-                  let rotate = r.bool(), r.remaining == 0
+                  let rotate = r.bool(), let face = r.bool(), let rawMode = r.u8(),
+                  let mode = BackgroundMode(rawValue: rawMode), let color = r.u32(), color <= 0xFFFFFF,
+                  r.remaining == 0
             else { return nil }
             c.lens = lens
             c.zoom = zoom
@@ -110,6 +112,9 @@ public struct MessageParser {
             c.lensPosition = lensPosition
             c.blur = blur
             c.rotate180 = rotate
+            c.faceFocus = face
+            c.backgroundMode = mode
+            c.backgroundColor = color
             return .cameraSettings(c)
         case .cameraState:
             var c = CameraState()
@@ -117,7 +122,8 @@ public struct MessageParser {
                   let isoMin = r.f32(), let isoMax = r.f32(), let shutterMin = r.u32(), let shutterMax = r.u32(),
                   let biasMin = r.f32(), let biasMax = r.f32(), let zoomMax = r.f32(), let focus = r.bool(),
                   let iso = r.f32(), let shutter = r.u32(), let temperature = r.f32(), let tint = r.f32(),
-                  let lensPosition = r.f32(), r.remaining == 0
+                  let lensPosition = r.f32(), let reactionsSupported = r.bool(), let reactionsEnabled = r.bool(),
+                  let gestures = r.bool(), r.remaining == 0
             else { return nil }
             c.lenses = lenses
             c.lens = lens
@@ -134,7 +140,12 @@ public struct MessageParser {
             c.temperatureK = temperature
             c.tint = tint
             c.lensPosition = lensPosition
+            c.reactionsSupported = reactionsSupported
+            c.reactionsEnabled = reactionsEnabled
+            c.gesturesEnabled = gestures
             return .cameraState(c)
+        case .backgroundImage:
+            return .backgroundImage(r.rest())
         }
     }
 }

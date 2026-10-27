@@ -145,12 +145,18 @@ std::optional<Message> DecodePayload(MsgType type, std::span<const uint8_t> payl
       auto lensPosition = r.F32();
       auto blur = r.U8();
       auto rotate = r.Bool();
+      auto face = r.Bool();
+      auto mode = r.U8();
+      auto color = r.U32();
       if (!lens || !zoom || !manualExposure || !iso || !shutter || !bias || !manualWb || !temperature || !tint ||
-          !manualFocus || !lensPosition || !blur || !rotate || r.Remaining() != 0 || *lens >= kLensCount) {
+          !manualFocus || !lensPosition || !blur || !rotate || !face || !mode || !color || r.Remaining() != 0 ||
+          *lens >= kLensCount || *mode >= kBackgroundModeCount || *color > 0xFFFFFF) {
         return std::nullopt;
       }
-      return CameraSettings{Lens(*lens), *zoom, *manualExposure, *iso,         *shutter,      *bias, *manualWb,
-                            *temperature, *tint, *manualFocus,    *lensPosition, *blur, *rotate};
+      return CameraSettings{Lens(*lens), *zoom,  *manualExposure, *iso,  *shutter,
+                            *bias,       *manualWb, *temperature, *tint, *manualFocus,
+                            *lensPosition, *blur, *rotate,        *face, BackgroundMode(*mode),
+                            *color};
     }
     case MsgType::CameraState: {
       auto lenses = r.U8();
@@ -168,14 +174,20 @@ std::optional<Message> DecodePayload(MsgType type, std::span<const uint8_t> payl
       auto temperature = r.F32();
       auto tint = r.F32();
       auto lensPosition = r.F32();
+      auto reactionsSupported = r.Bool();
+      auto reactionsEnabled = r.Bool();
+      auto gestures = r.Bool();
       if (!lenses || !lens || !isoMin || !isoMax || !shutterMin || !shutterMax || !biasMin || !biasMax || !zoomMax ||
-          !focus || !iso || !shutter || !temperature || !tint || !lensPosition || r.Remaining() != 0 ||
-          *lens >= kLensCount) {
+          !focus || !iso || !shutter || !temperature || !tint || !lensPosition || !reactionsSupported ||
+          !reactionsEnabled || !gestures || r.Remaining() != 0 || *lens >= kLensCount) {
         return std::nullopt;
       }
-      return CameraState{*lenses,  Lens(*lens), *isoMin, *isoMax, *shutterMin, *shutterMax,  *biasMin, *biasMax,
-                         *zoomMax, *focus,      *iso,    *shutter, *temperature, *tint, *lensPosition};
+      return CameraState{*lenses, Lens(*lens), *isoMin,  *isoMax,       *shutterMin, *shutterMax,
+                         *biasMin, *biasMax,   *zoomMax, *focus,        *iso,        *shutter,
+                         *temperature, *tint,  *lensPosition, *reactionsSupported, *reactionsEnabled, *gestures};
     }
+    case MsgType::BackgroundImage:
+      return BackgroundImage{r.Rest()};
   }
   return std::nullopt;
 }
@@ -240,6 +252,9 @@ std::vector<uint8_t> Encode(const Message& message) {
           payload.F32(m.lensPosition);
           payload.U8(m.blur);
           payload.Bool(m.rotate180);
+          payload.Bool(m.faceFocus);
+          payload.U8(uint8_t(m.backgroundMode));
+          payload.U32(m.backgroundColor);
         } else if constexpr (std::is_same_v<T, CameraState>) {
           type = MsgType::CameraState;
           payload.U8(m.lenses);
@@ -257,6 +272,12 @@ std::vector<uint8_t> Encode(const Message& message) {
           payload.F32(m.temperatureK);
           payload.F32(m.tint);
           payload.F32(m.lensPosition);
+          payload.Bool(m.reactionsSupported);
+          payload.Bool(m.reactionsEnabled);
+          payload.Bool(m.gesturesEnabled);
+        } else if constexpr (std::is_same_v<T, BackgroundImage>) {
+          type = MsgType::BackgroundImage;
+          payload.Bytes(m.jpeg);
         }
       },
       message);
@@ -282,7 +303,7 @@ MessageParser::Result MessageParser::Next(Message& out) {
   const uint8_t* head = buffer_.data() + offset_;
   const uint8_t type = head[0];
   const uint32_t length = uint32_t(head[1]) | uint32_t(head[2]) << 8 | uint32_t(head[3]) << 16 | uint32_t(head[4]) << 24;
-  if (type < uint8_t(MsgType::Hello) || type > uint8_t(MsgType::CameraState) || length > kMaxPayloadBytes) {
+  if (type < uint8_t(MsgType::Hello) || type > uint8_t(MsgType::BackgroundImage) || length > kMaxPayloadBytes) {
     failed_ = true;
     return Result::Error;
   }

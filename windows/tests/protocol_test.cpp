@@ -68,7 +68,7 @@ TEST(Protocol, ParserOversizeLengthIsError) {
 
 TEST(Protocol, ParserUnknownTypeIsError) {
   MessageParser parser;
-  parser.Feed(Header(0x0A, 0));
+  parser.Feed(Header(0x0B, 0));
   Message m;
   EXPECT_EQ(parser.Next(m), MessageParser::Result::Error);
 }
@@ -110,4 +110,34 @@ TEST(Protocol, VectorsMatchFiles) {
     ASSERT_EQ(parsed.size(), 1u) << vector.file;
     EXPECT_EQ(parsed[0], vector.message) << vector.file;
   }
+}
+
+namespace {
+
+// camera_settings.bin with one payload byte replaced.
+MessageParser::Result ParseSettingsWith(size_t payloadOffset, std::span<const uint8_t> patch) {
+  auto bytes = Encode(TestVectors()[8].message);
+  std::copy(patch.begin(), patch.end(), bytes.begin() + 5 + payloadOffset);
+  MessageParser parser;
+  parser.Feed(bytes);
+  Message m;
+  return parser.Next(m);
+}
+
+}  // namespace
+
+TEST(Protocol, BackgroundImageBytes) {
+  EXPECT_EQ(Encode(BackgroundImage{{0xFF, 0xD8, 0xFF}}), (std::vector<uint8_t>{0x0A, 3, 0, 0, 0, 0xFF, 0xD8, 0xFF}));
+  EXPECT_EQ(Encode(BackgroundImage{}), (std::vector<uint8_t>{0x0A, 0, 0, 0, 0}));
+}
+
+TEST(Protocol, RejectsBackgroundModeFour) {
+  // v2 payload is 34 bytes, then face_focus (34), background_mode (35), background_color (36..39).
+  const uint8_t mode = 4;
+  EXPECT_EQ(ParseSettingsWith(35, std::span(&mode, 1)), MessageParser::Result::Error);
+}
+
+TEST(Protocol, RejectsColorHighByte) {
+  const uint8_t color[4] = {0x00, 0x00, 0x00, 0x01};
+  EXPECT_EQ(ParseSettingsWith(36, color), MessageParser::Result::Error);
 }

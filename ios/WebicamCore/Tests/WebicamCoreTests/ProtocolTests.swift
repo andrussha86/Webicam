@@ -3,8 +3,8 @@ import XCTest
 
 /// Expected values of shared/testvectors/*.bin (mirrors windows/core/include/webicam/testvectors.h).
 private let vectors: [(String, Message)] = [
-    ("hello_pc.bin", .hello(version: 2, model: nil, formats: [])),
-    ("hello_phone.bin", .hello(version: 2, model: "iPhone16,1", formats: [
+    ("hello_pc.bin", .hello(version: 3, model: nil, formats: [])),
+    ("hello_phone.bin", .hello(version: 3, model: "iPhone16,1", formats: [
         CaptureFormat(width: 1280, height: 720, maxFps: 60),
         CaptureFormat(width: 1920, height: 1080, maxFps: 60),
         CaptureFormat(width: 3840, height: 2160, maxFps: 30),
@@ -31,6 +31,9 @@ private let vectors: [(String, Message)] = [
         c.lensPosition = 0.25
         c.blur = 60
         c.rotate180 = true
+        c.faceFocus = true
+        c.backgroundMode = .image
+        c.backgroundColor = 0x336699
         return c
     }())),
     ("camera_state.bin", .cameraState({
@@ -50,8 +53,12 @@ private let vectors: [(String, Message)] = [
         c.temperatureK = 5200
         c.tint = -5
         c.lensPosition = 0.75
+        c.reactionsSupported = true
+        c.reactionsEnabled = true
         return c
     }())),
+    ("background_image.bin", .backgroundImage(Data([0xFF, 0xD8, 0xFF]))),
+    ("background_image_empty.bin", .backgroundImage(Data())),
 ]
 
 private let vectorsDir: URL = {
@@ -93,7 +100,27 @@ final class ProtocolTests: XCTestCase {
 
     func testUnknownTypeThrows() {
         var parser = MessageParser()
-        parser.feed(Data([0x0A, 0, 0, 0, 0]))
+        parser.feed(Data([0x0B, 0, 0, 0, 0]))
+        XCTAssertThrowsError(try parser.next())
+    }
+
+    /// camera_settings.bin with payload bytes replaced; v2 fields take 34 bytes, then
+    /// face_focus (34), background_mode (35), background_color (36...39).
+    private func settingsWith(_ offset: Int, _ patch: [UInt8]) throws -> Data {
+        var bytes = [UInt8](try Data(contentsOf: vectorsDir.appendingPathComponent("camera_settings.bin")))
+        bytes.replaceSubrange((5 + offset)..<(5 + offset + patch.count), with: patch)
+        return Data(bytes)
+    }
+
+    func testRejectsBackgroundModeFour() throws {
+        var parser = MessageParser()
+        parser.feed(try settingsWith(35, [4]))
+        XCTAssertThrowsError(try parser.next())
+    }
+
+    func testRejectsColorHighByte() throws {
+        var parser = MessageParser()
+        parser.feed(try settingsWith(36, [0, 0, 0, 1]))
         XCTAssertThrowsError(try parser.next())
     }
 
