@@ -90,7 +90,7 @@ final class CaptureEngine: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
             guard format != nil else { return }
             if Self.device(for: new.lens)?.uniqueID != input?.device.uniqueID || activeLens == nil {
                 do {
-                    try activate(lens: new.lens)
+                    _ = try activate(lens: new.lens)
                 } catch {
                     settings.lens = previousLens
                     throw error

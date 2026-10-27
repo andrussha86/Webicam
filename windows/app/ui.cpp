@@ -76,7 +76,7 @@ void DrawCameraControls(UiState& state, ConnectionManager& connection) {
     }
     ImGui::EndDisabled();
   }
-  if (phone && phone->lens != c.lens) ImGui::TextDisabled("Переключение объектива…");
+  if (phone && phone->lens != c.lens) ImGui::TextDisabled("Переключение объектива...");
   ImGui::SliderFloat("Зум", &c.zoom, 1.0f, std::max(range.zoomMax, 1.01f), "%.2f×", ImGuiSliderFlags_Logarithmic);
   ImGui::Checkbox("Повернуть на 180°", &c.rotate180);
 
@@ -113,7 +113,7 @@ void DrawCameraControls(UiState& state, ConnectionManager& connection) {
   ImGui::BeginDisabled(!range.manualFocusSupported);
   if (ManualToggle("Авто##focus", c.manualFocus)) {
     ImGui::SliderFloat("Дистанция", &c.lensPosition, 0.0f, 1.0f, "%.2f");
-    ImGui::TextDisabled("0 — близко, 1 — далеко");
+    ImGui::TextDisabled("0 = близко, 1 = далеко");
   } else if (phone) {
     ImGui::TextDisabled("Сейчас: %.2f", phone->lensPosition);
   }
