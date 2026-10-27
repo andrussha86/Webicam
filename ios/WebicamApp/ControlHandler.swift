@@ -10,6 +10,8 @@ final class AppModel {
     var format = "—"
     var bitrate = "—"
     var warning: String?
+    /// Why the PC cannot reach the phone; shown instead of `warning` while set.
+    var listenError: String?
 }
 
 /// Wires capture → encoder → server and applies the PC's commands.
@@ -43,8 +45,9 @@ final class ControlHandler {
     }
 
     func start() {
-        server.onListenError = { [weak self] error in
-            self?.updateModel { $0.warning = "Не удалось открыть порт: \(error.localizedDescription)" }
+        server.onListenStateChange = { [weak self] error in
+            let text = error.map { "Не удалось открыть порт: \($0.localizedDescription)" }
+            self?.updateModel { $0.listenError = text }
         }
         server.start()
     }

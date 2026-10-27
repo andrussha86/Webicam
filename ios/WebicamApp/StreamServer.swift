@@ -2,14 +2,15 @@ import Foundation
 import Network
 import WebicamCore
 
-/// TCP server on 127.0.0.1:47800 — reachable only through the usbmux USB tunnel.
-/// One client at a time; a new connection replaces the old one.
+/// TCP server on port 47800 that accepts only loopback peers, i.e. connections arriving
+/// through the usbmux USB tunnel. One client at a time; a new connection replaces the old one.
 final class StreamServer {
     var onMessage: ((Message) -> Void)?
     var onConnectionChange: ((Bool) -> Void)?
     /// A P-frame was dropped: the stream is broken until the next keyframe.
     var onFrameDropped: (() -> Void)?
-    var onListenError: ((Error) -> Void)?
+    /// nil once the port is open, otherwise why it is not.
+    var onListenStateChange: ((Error?) -> Void)?
 
     private let queue = DispatchQueue(label: "webicam.server", qos: .userInteractive)
     private var listener: NWListener?
@@ -26,7 +27,7 @@ final class StreamServer {
             do {
                 try self.listen()
             } catch {
-                self.onListenError?(error)
+                self.onListenStateChange?(error)
             }
         }
     }
@@ -44,15 +45,28 @@ final class StreamServer {
         tcp.noDelay = true
         let parameters = NWParameters(tls: nil, tcp: tcp)
         parameters.allowLocalEndpointReuse = true
-        parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1",
-                                                     port: NWEndpoint.Port(rawValue: ProtocolConstants.phonePort)!)
-        let listener = try NWListener(using: parameters)
+        // Binding to 127.0.0.1 via requiredLocalEndpoint left the port closed for usbmux
+        // (Connect → Number 3), so listen on every interface and filter peers in accept().
+        let listener = try NWListener(using: parameters,
+                                      on: NWEndpoint.Port(rawValue: ProtocolConstants.phonePort)!)
         listener.newConnectionHandler = { [weak self] connection in self?.accept(connection) }
         listener.stateUpdateHandler = { [weak self, weak listener] state in
-            guard case .failed = state, let self, let listener, listener === self.listener else { return }
-            listener.cancel()
-            self.listener = nil
-            self.queue.asyncAfter(deadline: .now() + 0.5) { try? self.listen() }
+            guard let self, let listener, listener === self.listener else { return }
+            switch state {
+            case .ready:
+                self.onListenStateChange?(nil)
+            case let .waiting(error):
+                self.onListenStateChange?(error)
+            case let .failed(error):
+                self.onListenStateChange?(error)
+                listener.cancel()
+                self.listener = nil
+                self.queue.asyncAfter(deadline: .now() + 0.5) {
+                    do { try self.listen() } catch { self.onListenStateChange?(error) }
+                }
+            default:
+                break
+            }
         }
         listener.start(queue: queue)
         self.listener = listener
@@ -96,6 +110,10 @@ final class StreamServer {
     }
 
     private func accept(_ newConnection: NWConnection) {
+        guard Self.isLoopback(newConnection.endpoint) else {
+            newConnection.cancel()
+            return
+        }
         connection?.cancel()
         connection = newConnection
         parser = MessageParser()
@@ -115,6 +133,21 @@ final class StreamServer {
             }
         }
         newConnection.start(queue: queue)
+    }
+
+    /// usbmux delivers tunnelled connections from the phone's own loopback; anything else
+    /// is a Wi-Fi peer that must not see the camera.
+    private static func isLoopback(_ endpoint: NWEndpoint) -> Bool {
+        guard case let .hostPort(host, _) = endpoint else { return false }
+        switch host {
+        case let .ipv4(address):
+            return address.isLoopback
+        case let .ipv6(address):
+            // An IPv4 peer on a dual-stack socket shows up as ::ffff:127.x.x.x.
+            return address.isLoopback || address.asIPv4?.isLoopback == true
+        default:
+            return false
+        }
     }
 
     private func receive(on connection: NWConnection) {

@@ -33,7 +33,7 @@ struct StatusView: View {
         }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: dimmed)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: model.connected)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: model.warning)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: model.listenError ?? model.warning)
         .contentShape(Rectangle())
         .onTapGesture { wake() }
         .onAppear {
@@ -80,7 +80,7 @@ struct StatusView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            if let warning = model.warning {
+            if let warning = model.listenError ?? model.warning {
                 Text(warning)
                     .font(Theme.sans(15, relativeTo: .subheadline))
                     .foregroundStyle(Theme.text)
