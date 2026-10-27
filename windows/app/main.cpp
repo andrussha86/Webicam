@@ -215,7 +215,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
   VirtualCamHost camera;
   if (!camera.Start()) {
     ui.cameraError = "Виртуальная камера не запущена (" + Utf8(camera.LastError()) +
-                     "). Запустите install.ps1 от имени администратора.";
+                     "). Запустите install.cmd из папки программы.";
   }
 
   // The pipeline's callbacks reach the connection through a raw pointer that

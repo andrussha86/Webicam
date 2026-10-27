@@ -9,12 +9,11 @@ Webicam превращает iPhone (iOS 17+), подключённый кабе
 1. Установите **«Apple Devices»** из Microsoft Store (или iTunes) — это служба, через которую
    Windows общается с iPhone по USB.
 2. Распакуйте `Webicam-windows-x64.zip` в любую папку.
-3. Откройте PowerShell **от имени администратора** в этой папке и выполните:
-   ```powershell
-   powershell -ExecutionPolicy Bypass -File .\install.ps1
-   ```
+3. Дважды щёлкните `install.cmd` и подтвердите запрос администратора. Если окно не появилось,
+   откройте PowerShell **от имени администратора** в этой папке и выполните
+   `powershell -ExecutionPolicy Bypass -File .\install.ps1`.
    Скрипт копирует `webicam_vcam.dll` в `C:\Program Files\Webicam` и регистрирует камеру.
-   Это нужно один раз (и после обновления DLL). Удаление — `uninstall.ps1`.
+   Это нужно один раз (и после обновления DLL). Удаление — `uninstall.cmd`.
 4. Запустите `webicam.exe`. Камера «Webicam» видна в системе, пока программа запущена
    (закрытие окна сворачивает её в трей; «Выход» — в меню значка в трее).
 

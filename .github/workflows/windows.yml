@@ -29,4 +29,6 @@ jobs:
             windows/build/release/vcam/webicam_vcam.dll
             windows/install.ps1
             windows/uninstall.ps1
+            windows/install.cmd
+            windows/uninstall.cmd
           if-no-files-found: ignore
